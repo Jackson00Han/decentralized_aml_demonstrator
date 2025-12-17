@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Data / outputs (generated)
+data/
+outputs/
+models/
+logs/
+# keep sample data
+!data/sample
+!data/sample/*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reports
+report/*.pdf
+report/*.html
+report/*.docx
