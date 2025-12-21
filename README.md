@@ -1,29 +1,29 @@
-# decentralized_aml_demonstrator
+# Decentralized_aml_demonstrator
 
 
 # Quickstart(modeling only)
-Assumes data/raw/bank_small|bank_medium|bank_large already exist.
+## 1） Quickstart (modeling only)
 
+Assumes data already exists under:
+- `data/raw/bank_a`
+- `data/raw/bank_b`
+- `data/raw/bank_c`
 ```bash
+cd decentralized_aml_demonstrator
+
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-python scripts/02_train_local.py
+python scripts/02_train_local_baseline.py
 python scripts/03_federated_round.py
 python scripts/04_evaluate.py
 ```
+## 2）（Optional） Reproduce data with AMLSim
 
-# Optional: Reproduce data with AMLSim (one-time setup)
 
-AMLSim is an external dependency (cloned outside this repo).
+### 2.1 One-time AMLSim setup
 
-0. Set AMLSim path
-
-    ```bash
-    export AMLSIM_DIR=/path/to/AMLSim
-    ```
-   
 1. System dependencies (Ubuntu):
     ```bash
     sudo apt-get update
@@ -78,6 +78,28 @@ AMLSim is an external dependency (cloned outside this repo).
     bash scripts/build_AMLSim.sh
     ```
 
+### 2.2 Generate data with AMLSim
+AMLSim is an external dependency (cloned outside this repo).
+
+0. Set AMLSim path
+
+    ```bash
+    export AMLSIM_DIR=$HOME/projects/AMLSim
+    ```
+   Example:
+    ```bash
+    export AMLSIM_DIR=/home/admin_ml/Jackson/projects/aml/amlsim/AMLSim 
+    ```
+
+1. Use AMLSim's Python environment to run data generation script--01_generate_data.py, which is in this repo.
+
+    ```bash
+    source "$AMLSIM_DIR/.venv/bin/activate"
+
+    cd /path/to/decentralized_aml_demonstrator
+    python scripts/01_generate_data.py
+    ```
+After it completes, generated files will be copied into decentralized_aml_demonstrator/data/raw folder.
 
 
 

@@ -192,6 +192,12 @@ def main():
             "lift_recall_at_k": float(r_at_k / max(1e-12, base_r)) if base_r > 0 else None,
         }
 
+        print("\n--- Test set results ---")
+
+        print(f"number of test samples: {len(y_test)}")
+        print(f"number of test positives: {int(y_test.sum())}")
+
+
         print(f"TEST AP={test_ap} ROC_AUC={test_roc_auc}")
         print(
             f"TEST Top-{K}: hits={hits}/{int(y_test.sum())} "

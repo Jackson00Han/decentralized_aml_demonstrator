@@ -1,7 +1,7 @@
 {
   "general": {
-    "random_seed": 0,
-    "simulation_name": "bank_large",
+    "random_seed": 11,
+    "simulation_name": "bank_a",
     "total_steps": 720,
     "base_date": "2017-01-01"
   },
@@ -16,7 +16,7 @@
     "end_range": -1,
     "transaction_model": 1,
     "margin_ratio": 0.1,
-    "bank_id": "bank_large",
+    "bank_id": "bank_a",
 
     "cash_in": {
       "normal_interval": 100,
@@ -77,8 +77,6 @@
     "compute_diameter": false,
     "transaction_limit": 0,
     "transaction_interval": 7,
-    "sar_interval": 7,
-    "sar_balance_ratio": 1.0,
     "numBranches": 1000
   },
   "visualizer": {

@@ -1,7 +1,7 @@
 {
   "general": {
-    "random_seed": 0,
-    "simulation_name": "bank_small",
+    "random_seed": 22,
+    "simulation_name": "bank_b",
     "total_steps": 720,
     "base_date": "2017-01-01"
   },
@@ -16,7 +16,7 @@
     "end_range": -1,
     "transaction_model": 1,
     "margin_ratio": 0.1,
-    "bank_id": "bank_small",
+    "bank_id": "bank_b",
 
     "cash_in": {
       "normal_interval": 100,
@@ -36,7 +36,7 @@
     }
   },
   "input": {
-    "directory": "paramFiles/1K",
+    "directory": "paramFiles/10K",
     "schema": "schema.json",
     "accounts": "accounts.csv",
     "alert_patterns": "alertPatterns.csv",
@@ -77,8 +77,6 @@
     "compute_diameter": false,
     "transaction_limit": 0,
     "transaction_interval": 7,
-    "sar_interval": 7,
-    "sar_balance_ratio": 1.0,
     "numBranches": 1000
   },
   "visualizer": {
