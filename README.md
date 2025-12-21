@@ -9,15 +9,18 @@ Assumes data already exists under:
 - `data/raw/bank_b`
 - `data/raw/bank_c`
 ```bash
-cd decentralized_aml_demonstrator
 
-python -m venv .venv
-source .venv/bin/activate
+cd /path/to/decentralized_aml_demonstrator/ # cd /home/admin_ml/Jackson/projects/aml/decentralized_aml_demonstrator/
+
+deactivate # optional, deactivate AMLSim venv if active
+
 pip install -r requirements.txt
+source .venv/bin/activate
 
-python scripts/02_train_local_baseline.py
-python scripts/03_federated_round.py
-python scripts/04_evaluate.py
+python scripts/02_process_data.py
+python scripts/03_train_local_baseline.py
+python scripts/04_federated_round.py
+python scripts/05_evaluate.py
 ```
 ## 2）（Optional） Reproduce data with AMLSim
 
@@ -96,11 +99,10 @@ AMLSim is an external dependency (cloned outside this repo).
     ```bash
     source "$AMLSIM_DIR/.venv/bin/activate"
 
-    cd /path/to/decentralized_aml_demonstrator
+    cd /path/to/decentralized_aml_demonstrator/ # cd /home/admin_ml/Jackson/projects/aml/decentralized_aml_demonstrator/
     python scripts/01_generate_data.py
     ```
 After it completes, generated files will be copied into decentralized_aml_demonstrator/data/raw folder.
-
 
 
 
