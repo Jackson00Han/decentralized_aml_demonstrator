@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import sys
 import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 from src.data_splits import split_fixed_windows
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -72,6 +76,6 @@ def main(bank: str):
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bank", required=True)
+    ap.add_argument("--client", default='bank_a') # default bank for a quick test
     args = ap.parse_args()
-    main(args.bank)
+    main(args.client)

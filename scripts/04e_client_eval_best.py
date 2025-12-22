@@ -1,9 +1,13 @@
 from __future__ import annotations
-
+import sys
 import json
 from pathlib import Path
 
 import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.data_splits import split_fixed_windows
 from src.fl_protocol import GlobalPlan, load_params_npz
@@ -64,14 +68,14 @@ def main(bank: str, use_best: bool = True):
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--bank", required=True)
-    ap.add_argument("--use_best", action="store_true", help="evaluate best_model.npz (default)")
-    ap.add_argument("--use_latest", action="store_true", help="evaluate global_model_latest.npz")
-    args = ap.parse_args()
+    parse = argparse.ArgumentParser()
+    parse.add_argument("--client", required=True)
+    parse.add_argument("--use_best", action="store_true", help="evaluate best_model.npz (default)")
+    parse.add_argument("--use_latest", action="store_true", help="evaluate global_model_latest.npz")
+    args = parse.parse_args()
 
     use_best = True
     if args.use_latest:
         use_best = False
 
-    main(args.bank, use_best=use_best)
+    main(args.client, use_best=use_best)

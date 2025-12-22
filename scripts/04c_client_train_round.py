@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 from src.data_splits import split_fixed_windows
 from src.fl_protocol import GlobalPlan, load_params_npz, save_params_npz
 from src.fl_preprocess import build_preprocessor
@@ -90,11 +93,12 @@ def main(bank: str, round_id: int, local_epochs: int = 2, seed: int = 42):
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--bank", required=True)
-    ap.add_argument("--round", type=int, required=True)
-    ap.add_argument("--local_epochs", type=int, default=2)
-    ap.add_argument("--seed", type=int, default=42)
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--client", default="bank_a")
+    parser.add_argument("--round", type=int, default=1)
+    parser.add_argument("--local_epochs", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
 
-    main(args.bank, args.round, local_epochs=args.local_epochs, seed=args.seed)
+    main(args.client, args.round, local_epochs=args.local_epochs, seed=args.seed)
+

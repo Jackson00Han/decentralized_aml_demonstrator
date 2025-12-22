@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import sys
 import json
 from pathlib import Path
 
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 from src.fl_protocol import save_params_npz, load_params_npz, load_meta_json
 from src.fl_aggregators import ClientUpdate, fedavg
 
@@ -27,6 +31,7 @@ def save_state(path: Path, st: dict) -> None:
 
 def main(round_id: int):
     SERVER_OUT.mkdir(parents=True, exist_ok=True)
+
     state_path = SERVER_OUT / "server_state.json"
     st = load_state(state_path)
 
@@ -41,7 +46,7 @@ def main(round_id: int):
                 bank=bank,
                 n_train=int(meta.get("n_train", 1)),
                 params=params,
-                metrics={"val_ap": float(meta.get("val_ap", 0.0)), "val_n": float(meta.get("val_n", 1.0))},
+                metrics={"val_ap": float(meta.get("val_ap", 0.0)), "val_n": int(meta.get("val_n", 1))},
             )
         )
 
@@ -104,7 +109,7 @@ def main(round_id: int):
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--round", type=int, required=True)
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--round", type=int, default=1)
+    args = parser.parse_args()
     main(args.round)
