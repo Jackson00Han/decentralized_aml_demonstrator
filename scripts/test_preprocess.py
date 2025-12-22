@@ -51,6 +51,10 @@ def main():
     # note: build_preprocessor expects columns in plan order (num + cat in my earlier scripts)
     X = preprocess.transform(df[plan.feature_schema.num_cols + plan.feature_schema.cat_cols])
 
+    print(type(X))
+    print(hasattr(X, "tocsr"))
+
+
     print("== Input df ==")
     print(df)
     print()
