@@ -19,7 +19,7 @@ def run(cmd):
 
 
 def main(clean: bool = True):
-    if clean:
+    if clean: # remove previous outputs, making sure to start fresh
         shutil.rmtree(REPO_ROOT / "outputs" / "fl_server", ignore_errors=True)
 
     # clients report stats
