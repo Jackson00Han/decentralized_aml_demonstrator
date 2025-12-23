@@ -1,0 +1,39 @@
+project:
+  seed: 42
+
+banks:
+  names: ["bank_a", "bank_b", "bank_c"]
+  amlsim_config_dir: "configs/amlsim"
+
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  outputs_root: "outputs"
+
+preprocess:
+  keep_cols:
+    - acct_id
+    - type
+    - acct_stat
+    - acct_rptng_crncy
+    - prior_sar_count
+    - initial_deposit
+    - state
+    - country
+
+baseline:
+  top_k: 500
+  c_grid: [0.1, 1.0]
+  out_dir: "outputs/local_baseline"
+
+fl:
+  num_rounds: 2
+  local_epochs: 2
+  patience: 3
+  client_out_dir: "outputs/fl_clients"
+  server_out_dir: "outputs/fl_server"
+
+schema:
+  version: "v1"
+  cat_cols: ["orig_state", "bene_state"]
+  num_cols: ["base_amt", "orig_initial_deposit", "bene_initial_deposit"]
