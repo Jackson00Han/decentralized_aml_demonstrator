@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -137,27 +136,27 @@ def main() -> None:
         summary_rows.append(
             {
                 "bank": bank,
-                "C": best_C,
-                "val_ap": best_val_ap,
                 "test_ap": test_ap,
                 "roc_auc": test_auc if test_auc is not None else np.nan,
-                "topk_report": json.dumps(rep, ensure_ascii=True),
+                "pos": rep["pos"],
+                "n": rep["n"],
                 f"hits@{rep['k']}": rep["hits"],
+                f"expected_hits_random@{rep['k']}": rep["expected_hits_random"],
                 f"P@{rep['k']}": rep["precision_at_k"],
+                f"base_P@{rep['k']}": rep["baseline_precision_at_k"],
                 f"R@{rep['k']}": rep["recall_at_k"],
+                f"base_R@{rep['k']}": rep["baseline_recall_at_k"],
                 f"liftP@{rep['k']}": rep["lift_precision_at_k"] if rep["lift_precision_at_k"] is not None else np.nan,
             }
         )
 
     summary_df = pd.DataFrame(summary_rows).sort_values("bank")
+    out_csv = OUT_ROOT / "summary.csv"
+    summary_df.to_csv(out_csv, index=False)
     print("\n" + "=" * 68)
     print("Summary")
     print("=" * 68)
     print(summary_df.to_string(index=False))
-
-    out_csv = OUT_ROOT / "summary.csv"
-    summary_df.to_csv(out_csv, index=False)
-    print(f"Saved summary: {out_csv}")
 
 
 if __name__ == "__main__":
