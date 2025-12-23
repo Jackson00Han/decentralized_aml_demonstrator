@@ -92,7 +92,6 @@ class Config:
     fl: FLCfg
     schema: SchemaCfg
 
-
 def load_config(config_path: Optional[str | Path] = None) -> Config:
     """
     Load config.yaml and return a structured Config object.
