@@ -102,7 +102,10 @@ AMLSim is an external dependency (cloned outside this repo).
     cd /path/to/decentralized_aml_demonstrator/ # cd /home/admin_ml/Jackson/projects/aml/decentralized_aml_demonstrator/
     python scripts/01_generate_data.py
     ```
-After it completes, generated files will be copied into decentralized_aml_demonstrator/data/raw folder.
+    After it completes, generated files will be copied into decentralized_aml_demonstrator/data/raw folder. Remember to deactivate AMLSim venv after use:
+    ```bash
+    deactivate
+    ```
 
 
 

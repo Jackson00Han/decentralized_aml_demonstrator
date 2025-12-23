@@ -13,13 +13,8 @@ paths:
 preprocess:
   keep_cols:
     - acct_id
-    - type
-    - acct_stat
-    - acct_rptng_crncy
-    - prior_sar_count
     - initial_deposit
     - state
-    - country
 
 baseline:
   top_k: 500

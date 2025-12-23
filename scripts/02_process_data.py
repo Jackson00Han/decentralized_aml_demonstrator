@@ -2,35 +2,28 @@ import pandas as pd
 import os
 
 def main():
+    import sys
+    from pathlib import Path
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+    sys.path.append(str(REPO_ROOT))
+    from src.config import load_config
+    cfg = load_config()
 
-    bank_lists = ['bank_a', 'bank_b', 'bank_c']
+    bank_lists = cfg.banks.names
     for bank in bank_lists:
-
         # create directory
-        out_dir = f'data/processed/{bank}/'
-        os.makedirs(out_dir, exist_ok=True)
-
-
-        df_trans = pd.read_csv(f'data/raw/{bank}/transactions.csv')
-        df_accs = pd.read_csv(f'data/raw/{bank}/accounts.csv')
-        df_alerts = pd.read_csv(f'data/raw/{bank}/alert_transactions.csv')
+        out_dir = cfg.paths.data_processed / bank; os.makedirs(out_dir, exist_ok=True)
+        df_trans = pd.read_csv(cfg.paths.data_raw / bank / "transactions.csv")
+        df_accs = pd.read_csv(cfg.paths.data_raw / bank / "accounts.csv")
+        df_alerts = pd.read_csv(cfg.paths.data_raw / bank / "alert_transactions.csv")
 
         df = df_trans.copy()
         df['tran_timestamp'] = pd.to_datetime(df['tran_timestamp'], utc=True, errors='coerce')
 
-        df['y'] = df['tran_id'].isin(df_alerts['tran_id']).astype('int8')
+        df['y'] = df['tran_id'].isin(df_alerts['tran_id']).astype('int8') # binary label
 
         # select only relevant columns
-        keep_cols = [
-            'acct_id',
-            'type',
-            'acct_stat',
-            'acct_rptng_crncy',
-            'prior_sar_count',
-            'initial_deposit',
-            'state',
-            'country',
-            ]
+        keep_cols = cfg.preprocess.keep_cols
         df_accs = df_accs[keep_cols].copy()
         
         df_org = df_accs.rename(columns={c: f"orig_{c}" for c in keep_cols})

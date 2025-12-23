@@ -11,34 +11,20 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
+import sys
+from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_PROCESSED = REPO_ROOT / "data" / "processed"
-OUT_ROOT = REPO_ROOT / "outputs" / "local_baseline"
+sys.path.append(str(REPO_ROOT))
+from src.config import load_config
+from src.data_splits import split_fixed_windows
+cfg = load_config()
 
-TOP_K = 500
-C_GRID = [0.1, 1.0]
-
+DATA_PROCESSED = cfg.paths.data_processed
 
 def safe_roc_auc(y_true: np.ndarray, y_score: np.ndarray) -> float | None:
     if len(np.unique(y_true)) < 2:
         return None
     return float(roc_auc_score(y_true, y_score))
-
-
-def split_by_time(
-    df: pd.DataFrame,
-    ts_col: str = "tran_timestamp",
-    train_frac: float = 0.6,
-    val_frac: float = 0.2,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    df = df.sort_values(ts_col).reset_index(drop=True)
-    n = len(df)
-    n_train = int(n * train_frac)
-    n_val = int(n * val_frac)
-    train = df.iloc[:n_train]
-    val = df.iloc[n_train : n_train + n_val]
-    test = df.iloc[n_train + n_val :]
-    return train, val, test
 
 
 def topk_report(y_true: np.ndarray, scores: np.ndarray, k: int) -> dict:
@@ -89,7 +75,7 @@ def make_model(cat_cols: list[str], num_cols: list[str], C: float) -> Pipeline:
 def find_banks() -> list[str]:
     if not DATA_PROCESSED.exists():
         return []
-    return sorted([p.name for p in DATA_PROCESSED.iterdir() if p.is_dir()])
+    return sorted([p.name for p in DATA_PROCESSED.iterdir() if p.is_dir()]) # iterdir() returns the immediate children only
 
 
 def fmt(x: float | None, nd: int = 6) -> str:
@@ -99,11 +85,15 @@ def fmt(x: float | None, nd: int = 6) -> str:
 
 
 def main() -> None:
+
+    OUT_ROOT = cfg.paths.out_local_baseline; OUT_ROOT.mkdir(parents=True, exist_ok=True)
+    TOP_K = cfg.baseline.top_k
+    C_GRID = cfg.baseline.c_grid
+
     banks = find_banks()
     if not banks:
         raise RuntimeError(f"No banks found under {DATA_PROCESSED}")
 
-    OUT_ROOT.mkdir(parents=True, exist_ok=True)
     summary_rows: list[dict] = []
 
     for bank in banks:
@@ -116,16 +106,12 @@ def main() -> None:
         if "y" not in df.columns or "tran_timestamp" not in df.columns:
             raise KeyError(f"{bank}: missing required columns y / tran_timestamp")
 
-        df["tran_timestamp"] = pd.to_datetime(df["tran_timestamp"], utc=True, errors="coerce")
-        if df["tran_timestamp"].isna().any():
-            raise ValueError(f"{bank}: tran_timestamp has NaT")
-
-        train_df, val_df, test_df = split_by_time(df)
+        train_df, val_df, test_df, df_use = split_fixed_windows(df, ts_col="tran_timestamp")
         y_train = train_df["y"].astype(int).to_numpy()
         y_val = val_df["y"].astype(int).to_numpy()
         y_test = test_df["y"].astype(int).to_numpy()
 
-        feature_cols = [c for c in df.columns if c not in {"y", "tran_timestamp"}]
+        feature_cols = [c for c in df_use.columns if c not in {"y", "tran_timestamp"}]
         X_train = train_df[feature_cols]
         X_val = val_df[feature_cols]
         X_test = test_df[feature_cols]
