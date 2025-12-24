@@ -135,16 +135,8 @@ def main(
             "split_rule": data["meta"].get("split_rule", "fixed_windows_2017_to_2018"),
         },
     )
+    print(f"Client {bank} round {round_id} model update saved. val_ap={val_ap}")
 
-    val_ap_disp = f"{val_ap:.6f}" if val_ap is not None else "NA"
-    counts = data["meta"].get("counts", {})
-    train_n = counts.get("train_n", n_train)
-    val_n_all = counts.get("val_n", val_n)
-    test_n = counts.get("test_n", len(data["y_test"]))
-    print(
-        f"[OK] {bank} round {round_id:03d} | "
-        f"train={train_n} val={val_n_all} test={test_n} | val_ap={val_ap_disp}"
-    )
 
 
 if __name__ == "__main__":
