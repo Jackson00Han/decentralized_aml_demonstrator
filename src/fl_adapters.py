@@ -46,7 +46,7 @@ class SkLogRegSGD(ModelAdapter):
         self.d = int(d)
         self.seed = int(seed)
         self.clf = SGDClassifier(
-            loss="log_loss",
+            loss="log_loss", # logistic regression
             penalty="l2",
             alpha=alpha,
             learning_rate=learning_rate,

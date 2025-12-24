@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -59,7 +59,9 @@ class PreprocessCfg:
 @dataclass(frozen=True)
 class BaselineCfg:
     top_k: int
-    c_grid: List[float]
+    alpha_grid: List[float]
+    max_rounds: int
+    patience: int
     out_dir: Path
 
 
@@ -69,8 +71,8 @@ class FLCfg:
     num_rounds: int
     local_epochs: int
     patience: int
-    client_out_dir: Path
-    server_out_dir: Path
+    alpha: float = 1e-4
+    alpha_grid: List[float] = field(default_factory=list)
 
 @dataclass(frozen=True)
 class SchemaCfg:
@@ -122,16 +124,33 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
     # Baseline
     baseline = raw.get("baseline", {})
     top_k = int(baseline.get("top_k", 500))
-    c_grid = [float(x) for x in baseline.get("c_grid", [0.1, 1.0])]
+    baseline_alpha_grid = [float(x) for x in baseline.get("alpha_grid", [1e-3, 1e-4, 1e-5])]
+    max_rounds = int(baseline.get("max_rounds", 10))
+    baseline_patience = int(baseline.get("patience", 3))
     baseline_out = _p(repo_root, baseline.get("out_dir", "outputs/local_baseline"))
 
     # FL
     fl = raw.get("fl", {})
     num_rounds = int(fl.get("num_rounds", 2))
     local_epochs = int(fl.get("local_epochs", 2))
-    patience = int(fl.get("patience", 3))
-    fl_clients = _p(repo_root, fl.get("client_out_dir", "outputs/fl_clients"))
-    fl_server = _p(repo_root, fl.get("server_out_dir", "outputs/fl_server"))
+    fl_patience = int(fl.get("patience", 3))
+    alpha = float(fl.get("alpha", 1e-5))
+    fl_alpha_grid = [float(x) for x in fl.get("alpha_grid", baseline_alpha_grid)]
+
+    out_fl_clients = _p(
+        repo_root,
+        paths.get(
+            "out_fl_clients",
+            fl.get("client_out_dir", str(outputs_root / "fl_clients")),
+        ),
+    )
+    out_fl_server = _p(
+        repo_root,
+        paths.get(
+            "out_fl_server",
+            fl.get("server_out_dir", str(outputs_root / "fl_server")),
+        ),
+    )
 
     # Schema
     schema = raw.get("schema", {})
@@ -148,17 +167,23 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
             data_processed=data_processed,
             outputs_root=outputs_root,
             out_local_baseline=baseline_out,
-            out_fl_clients=fl_clients,
-            out_fl_server=fl_server,
+            out_fl_clients=out_fl_clients,
+            out_fl_server=out_fl_server,
         ),
         preprocess=PreprocessCfg(keep_cols=keep_cols),
-        baseline=BaselineCfg(top_k=top_k, c_grid=c_grid, out_dir=baseline_out),
+        baseline=BaselineCfg(
+            top_k=top_k,
+            alpha_grid=baseline_alpha_grid,
+            max_rounds=max_rounds,
+            patience=baseline_patience,
+            out_dir=baseline_out,
+        ),
         fl=FLCfg(
             num_rounds=num_rounds,
             local_epochs=local_epochs,
-            patience=patience,
-            client_out_dir=fl_clients,
-            server_out_dir=fl_server,
+            patience=fl_patience,
+            alpha=alpha,
+            alpha_grid=fl_alpha_grid,
         ),
         schema=SchemaCfg(version=schema_version, cat_cols=cat_cols, num_cols=num_cols),
     )

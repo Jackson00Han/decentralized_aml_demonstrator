@@ -6,24 +6,22 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-from src.fl_protocol import GlobalPlan, FeatureSchema
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SERVER_OUT = REPO_ROOT / "outputs" / "fl_server"
-CLIENT_OUT = REPO_ROOT / "outputs" / "fl_clients"
-
-CAT_COLS = ["orig_state", "bene_state"]
-NUM_COLS = ["base_amt", "orig_initial_deposit", "bene_initial_deposit"]
-
-SCHEMA_VERSION = "v1"
-
 
 def main():
-    SERVER_OUT.mkdir(parents=True, exist_ok=True)
 
+    ROOT = Path(__file__).resolve().parents[1]
+    sys.path.append(str(ROOT))
+    from src.fl_protocol import GlobalPlan, FeatureSchema
+    from src.config import load_config
+    cfg = load_config()
+
+    SERVER_OUT = cfg.paths.out_fl_server; SERVER_OUT.mkdir(parents=True, exist_ok=True)
+    CLIENT_OUT = cfg.paths.out_fl_clients
+
+    CAT_COLS = cfg.schema.cat_cols
+    NUM_COLS = cfg.schema.num_cols
+    SCHEMA_VERSION = cfg.schema.version
+    
     # collect stats
     stats_files = sorted(CLIENT_OUT.glob("*/stats.json"))
     if not stats_files:

@@ -1,35 +1,30 @@
 from __future__ import annotations
 
-import sys
 import json
 from pathlib import Path
-
-import numpy as np
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-from src.fl_protocol import save_params_npz, load_params_npz, load_meta_json
-from src.fl_aggregators import ClientUpdate, fedavg
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SERVER_OUT = REPO_ROOT / "outputs" / "fl_server"
-CLIENT_OUT = REPO_ROOT / "outputs" / "fl_clients"
-
-PATIENCE = 3
-
 
 def load_state(path: Path) -> dict:
     if not path.exists():
         return {"best_val_ap": -1.0, "best_round": -1, "no_improve": 0}
     return json.loads(path.read_text(encoding="utf-8"))
 
-
 def save_state(path: Path, st: dict) -> None:
     path.write_text(json.dumps(st, indent=2), encoding="utf-8")
 
 
 def main(round_id: int):
+    import sys
+    ROOT = Path(__file__).resolve().parents[1]
+    sys.path.append(str(ROOT))
+    from src.fl_protocol import save_params_npz, load_params_npz, load_meta_json
+    from src.fl_aggregators import ClientUpdate, fedavg
+    from src.config import load_config
+    cfg = load_config()
+    SERVER_OUT = cfg.paths.out_fl_server
+    CLIENT_OUT = cfg.paths.out_fl_clients
+
+    PATIENCE = cfg.fl.patience
+
     SERVER_OUT.mkdir(parents=True, exist_ok=True)
 
     state_path = SERVER_OUT / "server_state.json"
@@ -110,6 +105,6 @@ def main(round_id: int):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--round", type=int, default=1)
+    parser.add_argument("--round_id", type=int, default=1)
     args = parser.parse_args()
-    main(args.round)
+    main(args.round_id)

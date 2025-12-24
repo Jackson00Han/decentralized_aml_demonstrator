@@ -8,7 +8,9 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+
 
 from src.fl_protocol import GlobalPlan
 
@@ -41,6 +43,16 @@ class FixedStandardScaler(BaseEstimator, TransformerMixin):
             return np.array(self.feature_names_in_, dtype=object)
         return np.array(input_features, dtype=object)
 
+def build_local_preprocessor(cat_cols: list[str], num_cols: list[str]) -> ColumnTransformer:
+    cat_pipe = Pipeline([("onehot", OneHotEncoder(handle_unknown="ignore"))])
+    num_pipe = Pipeline([("scaler", StandardScaler())])
+    return ColumnTransformer(
+        transformers=[
+            ("cat", cat_pipe, cat_cols),
+            ("num", num_pipe, num_cols),
+        ],
+        remainder="drop",
+    )
 
 
 def build_preprocessor(plan: GlobalPlan) -> ColumnTransformer:

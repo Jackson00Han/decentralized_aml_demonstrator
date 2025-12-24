@@ -9,6 +9,8 @@ paths:
   data_raw: "data/raw"
   data_processed: "data/processed"
   outputs_root: "outputs"
+  out_fl_clients: "outputs/fl_clients"
+  out_fl_server: "outputs/fl_server"
 
 preprocess:
   keep_cols:
@@ -18,15 +20,17 @@ preprocess:
 
 baseline:
   top_k: 500
-  c_grid: [0.1, 1.0]
+  alpha_grid: [1e-3, 1e-4, 1e-5]
+  max_rounds: 10
+  patience: 3
   out_dir: "outputs/local_baseline"
 
 fl:
-  num_rounds: 2
-  local_epochs: 2
+  num_rounds: 10
+  local_epochs: 1
   patience: 3
-  client_out_dir: "outputs/fl_clients"
-  server_out_dir: "outputs/fl_server"
+  alpha: 1e-4
+  alpha_grid: [1e-3, 1e-4, 1e-5]
 
 schema:
   version: "v1"

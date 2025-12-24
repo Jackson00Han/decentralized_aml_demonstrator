@@ -3,41 +3,44 @@ import sys
 import json
 from pathlib import Path
 
-import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.data_splits import split_fixed_windows
+from src.config import load_config
+from src.fl_cache import load_or_build_cache
 from src.fl_protocol import GlobalPlan, load_params_npz
 from src.fl_preprocess import build_preprocessor
 from src.fl_adapters import SkLogRegSGD
-from src.metrics import ap, safe_roc_auc, topk
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_PROCESSED = REPO_ROOT / "data" / "processed"
-CLIENT_OUT = REPO_ROOT / "outputs" / "fl_clients"
-SERVER_OUT = REPO_ROOT / "outputs" / "fl_server"
-
-TOP_K = 500
+from src.metrics import ap, safe_roc_auc, topk_report
 
 
 def main(bank: str, use_best: bool = True):
-    plan = GlobalPlan.load(SERVER_OUT / "global_plan.json")
+    cfg = load_config()
+    data_processed = cfg.paths.data_processed
+    client_out = cfg.paths.out_fl_clients
+    server_out = cfg.paths.out_fl_server
+    top_k = cfg.baseline.top_k
+
+    plan_path = server_out / "global_plan.json"
+    plan = GlobalPlan.load(plan_path)
     preprocess = build_preprocessor(plan)
 
-    model_path = SERVER_OUT / ("best_model.npz" if use_best else "global_model_latest.npz")
+    model_path = server_out / ("best_model.npz" if use_best else "global_model_latest.npz")
     params = load_params_npz(model_path)
 
-    df = pd.read_parquet(DATA_PROCESSED / bank / f"{bank}_merged.parquet")
-
-    # fixed-window split
-    tr, va, te, df_use = split_fixed_windows(df, ts_col="tran_timestamp")
-
-    feat_cols = plan.feature_schema.num_cols + plan.feature_schema.cat_cols
-    X_te = preprocess.transform(te[feat_cols])
-    y_te = te["y"].astype(int).to_numpy()
+    cache = load_or_build_cache(
+        bank=bank,
+        data_processed=data_processed,
+        client_out=client_out,
+        plan_path=plan_path,
+        plan=plan,
+        preprocess=preprocess,
+        ts_col="tran_timestamp",
+    )
+    X_te = cache["X_test"]
+    y_te = cache["y_test"].astype(int)
 
     d = X_te.shape[1]
     model = SkLogRegSGD(d=d)
@@ -47,20 +50,14 @@ def main(bank: str, use_best: bool = True):
     res = {
         "bank": bank,
         "which_model": "best_model" if use_best else "latest_model",
-        "test_n": int(len(te)),
+        "test_n": int(len(y_te)),
         "test_pos": int(y_te.sum()),
         "test_ap": ap(y_te, scores),
         "test_roc_auc": safe_roc_auc(y_te, scores),
-        "topk": topk(y_te, scores, TOP_K),
-        "split_rule": {
-            "train": "[2017-01-01, 2018-05-01)",
-            "val":   "[2018-05-01, 2018-09-01)",
-            "test":  "[2018-09-01, 2019-01-01)",
-            "timezone": "UTC",
-        },
+        "topk": topk_report(y_te, scores, top_k)
     }
 
-    out_dir = CLIENT_OUT / bank
+    out_dir = client_out / bank
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "metrics_test.json").write_text(json.dumps(res, indent=2), encoding="utf-8")
     print(f"[OK] wrote {out_dir/'metrics_test.json'} | test_ap={res['test_ap']:.6f}")
@@ -69,7 +66,7 @@ def main(bank: str, use_best: bool = True):
 if __name__ == "__main__":
     import argparse
     parse = argparse.ArgumentParser()
-    parse.add_argument("--client", required=True)
+    parse.add_argument("--client", default="bank_a")
     parse.add_argument("--use_best", action="store_true", help="evaluate best_model.npz (default)")
     parse.add_argument("--use_latest", action="store_true", help="evaluate global_model_latest.npz")
     args = parse.parse_args()

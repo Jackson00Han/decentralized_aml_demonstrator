@@ -5,34 +5,20 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 import sys
-from pathlib import Path
+
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(REPO_ROOT))
 from src.config import load_config
 from src.data_splits import split_fixed_windows
+from src.fl_adapters import SkLogRegSGD
 from src.metrics import ap, safe_roc_auc, topk_report
+from src.fl_preprocess import build_local_preprocessor
 cfg = load_config()
 DATA_PROCESSED = cfg.paths.data_processed
 
-def make_model(cat_cols: list[str], num_cols: list[str], C: float) -> Pipeline:
-    cat_pipe = Pipeline([("onehot", OneHotEncoder(handle_unknown="ignore"))])
-    num_pipe = Pipeline([("scaler", StandardScaler())])
-    pre = ColumnTransformer(
-        transformers=[
-            ("cat", cat_pipe, cat_cols),
-            ("num", num_pipe, num_cols),
-        ],
-        remainder="drop",
-    )
-
-    clf = LogisticRegression(C=float(C), max_iter=200, n_jobs=1, solver="lbfgs")
-    return Pipeline([("pre", pre), ("clf", clf)])
 
 def find_banks() -> list[str]:
     if not DATA_PROCESSED.exists():
@@ -48,7 +34,14 @@ def main() -> None:
 
     OUT_ROOT = cfg.paths.out_local_baseline; OUT_ROOT.mkdir(parents=True, exist_ok=True)
     TOP_K = cfg.baseline.top_k
-    C_GRID = cfg.baseline.c_grid
+    ALPHA_GRID = cfg.baseline.alpha_grid
+    max_rounds = cfg.baseline.max_rounds
+    patience = cfg.baseline.patience
+    local_epochs = cfg.fl.local_epochs
+    seed = cfg.project.seed
+    cat_cols = cfg.schema.cat_cols
+    num_cols = cfg.schema.num_cols
+    feat_cols = num_cols + cat_cols
 
     banks = find_banks()
     if not banks:
@@ -71,13 +64,12 @@ def main() -> None:
         y_val = val_df["y"].astype(int).to_numpy()
         y_test = test_df["y"].astype(int).to_numpy()
 
-        feature_cols = [c for c in df_use.columns if c not in {"y", "tran_timestamp"}]
-        X_train = train_df[feature_cols]
-        X_val = val_df[feature_cols]
-        X_test = test_df[feature_cols]
+        preprocess = build_local_preprocessor(cat_cols, num_cols)
+        preprocess.fit(train_df[feat_cols])
 
-        cat_cols = cfg.schema.cat_cols
-        num_cols = cfg.schema.num_cols
+        X_train = preprocess.transform(train_df[feat_cols])
+        X_val = preprocess.transform(val_df[feat_cols])
+        X_test = preprocess.transform(test_df[feat_cols])
 
         print("\n" + "=" * 68)
         print(f"Local baseline | {bank}")
@@ -88,29 +80,39 @@ def main() -> None:
             f"test={len(test_df)} (pos={int(y_test.sum())})"
         )
 
-        # Tune C by val AP
+        # Tune alpha by val AP
         cand = []
-        for C in C_GRID:
-            model = make_model(cat_cols, num_cols, C=C)
-            model.fit(X_train, y_train)
-            val_scores = model.predict_proba(X_val)[:, 1]
-            val_ap = float(ap(y_val, val_scores)) if y_val.sum() > 0 else 0.0
-            cand.append((float(C), val_ap))
+        for alpha in ALPHA_GRID:
+            model = SkLogRegSGD(d=X_train.shape[1], alpha=alpha, seed=seed)
+            best_val_ap = -1.0
+            best_params = None
+            best_round = 0
+            no_improve = 0
+            for r in range(1, max_rounds + 1):
+                model.train_one_round(X_train, y_train, local_epochs=local_epochs, seed=seed + r)
+                val_scores = model.predict_scores(X_val)
+                val_ap = float(ap(y_val, val_scores)) if y_val.sum() > 0 else 0.0
+                if val_ap > best_val_ap + 1e-9:
+                    best_val_ap = val_ap
+                    best_params = model.get_params()
+                    best_round = r
+                    no_improve = 0
+                else:
+                    no_improve += 1
+                if no_improve >= patience:
+                    break
+            cand.append((float(alpha), best_val_ap, best_params, best_round))
 
-        best_C, best_val_ap = max(cand, key=lambda x: x[1])
-        tune_str = " | ".join([f"C={c:g}: {avp:.6f}" for c, avp in cand])
-        print(f"Tune C (val AP): {tune_str}")
-        print(f"Selected: C={best_C:g} (val_AP={best_val_ap:.6f})")
+        best_alpha, best_val_ap, best_params, best_round = max(cand, key=lambda x: x[1])
+        tune_str = " | ".join([f"alpha={c:g}: {avp:.6f}@r{r}" for c, avp, _, r in cand])
+        print(f"Tune alpha (val AP): {tune_str}")
+        print(f"Selected: alpha={best_alpha:g} (val_AP={best_val_ap:.6f})")
 
-        # Train final on train+val
-        trainval_df = pd.concat([train_df, val_df], axis=0, ignore_index=True)
-        y_trainval = trainval_df["y"].astype(int).to_numpy()
-        X_trainval = trainval_df[feature_cols]
-
-        model = make_model(cat_cols, num_cols, C=best_C)
-        model.fit(X_trainval, y_trainval)
-
-        test_scores = model.predict_proba(X_test)[:, 1]
+        if best_params is None:
+            raise RuntimeError(f"{bank}: no model params saved for alpha={best_alpha:g}")
+        model = SkLogRegSGD(d=X_test.shape[1], alpha=best_alpha, seed=seed)
+        model.set_params(best_params)
+        test_scores = model.predict_scores(X_test)
         test_ap = float(ap(y_test, test_scores)) if y_test.sum() > 0 else 0.0
         test_auc = safe_roc_auc(y_test, test_scores)
         rep = topk_report(y_test, test_scores, k=TOP_K)
@@ -122,7 +124,8 @@ def main() -> None:
 
         metrics = {
             "bank": bank,
-            "selected_C": best_C,
+            "selected_alpha": best_alpha,
+            "selected_round": best_round,
             "val_ap_best": best_val_ap,
             "test_ap": test_ap,
             "test_roc_auc": test_auc,
@@ -147,6 +150,8 @@ def main() -> None:
                 f"R@{rep['k']}": rep["recall_at_k"],
                 f"base_R@{rep['k']}": rep["baseline_recall_at_k"],
                 f"liftP@{rep['k']}": rep["lift_precision_at_k"] if rep["lift_precision_at_k"] is not None else np.nan,
+                "selected_alpha": best_alpha,
+                "selected_round": best_round,
             }
         )
 
@@ -157,7 +162,6 @@ def main() -> None:
     print("Summary")
     print("=" * 68)
     print(summary_df.to_string(index=False))
-
 
 if __name__ == "__main__":
     main()
