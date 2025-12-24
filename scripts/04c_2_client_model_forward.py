@@ -50,10 +50,24 @@ def load_dataset(ds_dir: Path, expected_plan_hash: str) -> dict:
     }
 
 
+def find_dataset_dir(bank: str, client_out: Path, expected_plan_hash: str) -> Path:
+    base = client_out / bank / "datasets"
+    if not base.exists():
+        raise FileNotFoundError(f"Missing datasets dir: {base} (run 04c_1_client_initialization.py)")
+
+    prefix = f"plan_{expected_plan_hash[:8]}"
+    candidates = [p for p in base.iterdir() if p.is_dir() and p.name.startswith(prefix)]
+    if not candidates:
+        raise FileNotFoundError(
+            f"No dataset matching {prefix} under {base} (run 04c_1_client_initialization.py)"
+        )
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
 def main(
     bank: str,
     round_id: int,
-    data_dir: str,
+    data_dir: str | None,
     alpha_override: float | None = None,
     use_trainval: bool = False,
 ) -> None:
@@ -66,7 +80,7 @@ def main(
         raise FileNotFoundError(f"Missing global plan: {plan_path} (run 04b_server_build_global_plan.py)")
     plan = GlobalPlan.load(plan_path)
 
-    ds_dir = Path(data_dir)
+    ds_dir = Path(data_dir) if data_dir else find_dataset_dir(bank, client_out, plan_hash(plan_path))
     data = load_dataset(ds_dir, plan_hash(plan_path))
 
     local_epochs = cfg.fl.local_epochs
@@ -139,7 +153,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--client", default="bank_a")
     parser.add_argument("--round_id", type=int, default=1)
-    parser.add_argument("--data_dir", required=True, help="dataset dir from 04c_1_client_initialization.py")
+    parser.add_argument("--data_dir", default=None, help="dataset dir from 04c_1_client_initialization.py")
     parser.add_argument("--alpha", type=float, default=None, help="override fl.alpha for this run")
     parser.add_argument("--use_trainval", action="store_true", help="train on train+val (skip val metrics)")
     args = parser.parse_args()
