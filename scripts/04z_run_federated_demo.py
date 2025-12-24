@@ -11,6 +11,7 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(REPO_ROOT))
 from src.config import load_config
+from src.fl_protocol import load_meta_json
 
 PY = [sys.executable]
 
@@ -26,10 +27,44 @@ def run(cmd):
     print("\n>>>", " ".join(map(str, disp)))
     subprocess.run(list(map(str, cmd)), check=True)
 
-def load_state(path: Path) -> dict | None:
+def load_state(path: Path) -> dict:
     if not path.exists():
-        return None
+        return {"best_val_ap": -1.0, "best_round": -1, "no_improve": 0}
     return json.loads(path.read_text(encoding="utf-8"))
+
+def save_state(path: Path, st: dict) -> None:
+    path.write_text(json.dumps(st, indent=2), encoding="utf-8")
+
+def copy_model_with_meta(src: Path, dst: Path) -> None:
+    shutil.copyfile(src, dst)
+    src_meta = src.with_suffix(".meta.json")
+    if src_meta.exists():
+        shutil.copyfile(src_meta, dst.with_suffix(".meta.json"))
+
+def compute_round_metrics(client_out: Path, round_id: int) -> tuple[float | None, int, list[dict]]:
+    updates = []
+    for upd in sorted(client_out.glob(f"*/updates/round_{round_id:03d}_update.npz")):
+        meta = load_meta_json(upd)
+        if not meta:
+            raise RuntimeError(f"Missing update meta: {upd}")
+        bank = meta.get("bank", upd.parts[-3])
+        updates.append(
+            {
+                "bank": bank,
+                "n_train": int(meta.get("n_train", 0)),
+                "val_n": int(meta.get("val_n", 0)),
+                "val_ap": float(meta.get("val_ap", 0.0)),
+            }
+        )
+    if not updates:
+        raise RuntimeError(f"No client updates found for round {round_id}")
+
+    val_n_total = sum(u["val_n"] for u in updates)
+    if val_n_total > 0:
+        val_ap_w = sum(u["val_ap"] * u["val_n"] for u in updates) / val_n_total
+    else:
+        val_ap_w = None
+    return val_ap_w, val_n_total, updates
 
 def clean_round_artifacts(server_out: Path, client_out: Path) -> None:
     server_out.mkdir(parents=True, exist_ok=True)
@@ -72,10 +107,15 @@ def run_rounds(
     use_trainval: bool,
     early_stop: bool,
 ) -> dict | None:
+    state_path = server_out / "server_state.json"
+    log_path = server_out / "round_logs.json"
+    st = load_state(state_path)
+    logs = json.loads(log_path.read_text(encoding="utf-8")) if log_path.exists() else []
+
     for r in range(1, num_rounds + 1):
         for b in banks:
             cmd = [
-                str(REPO_ROOT / "scripts/04c_client_train_round.py"),
+                str(REPO_ROOT / "scripts/04d_client_one_round_update.py"),
                 "--client",
                 b,
                 "--round_id",
@@ -86,20 +126,53 @@ def run_rounds(
             if use_trainval:
                 cmd += ["--use_trainval"]
             run(PY + cmd)
-        run(PY + [str(REPO_ROOT / "scripts/04d_server_aggregate_round.py"), "--round_id", str(r)])
+        run(PY + [str(REPO_ROOT / "scripts/04e_server_aggregate_round.py"), "--round_id", str(r)])
+
+        val_ap_w, val_n_total, client_rows = compute_round_metrics(client_out, r)
+        logs.append(
+            {
+                "round": r,
+                "val_ap_weighted": val_ap_w,
+                "val_n_total": val_n_total,
+                "clients": client_rows,
+            }
+        )
+        log_path.write_text(json.dumps(logs, indent=2), encoding="utf-8")
+
         if early_stop:
-            st = load_state(server_out / "server_state.json")
-            if st and st.get("no_improve", 0) >= patience:
-                best_round = st.get("best_round", -1)
-                best_val_ap = st.get("best_val_ap", -1.0)
+            if val_ap_w is None:
+                print(f"[WARN] round {r:03d}: val_n_total=0, early stop skipped.")
+                continue
+
+            improved = val_ap_w > st["best_val_ap"] + 1e-9
+            if improved:
+                st["best_val_ap"] = float(val_ap_w)
+                st["best_round"] = int(r)
+                st["no_improve"] = 0
+                copy_model_with_meta(
+                    server_out / "global_model_latest.npz",
+                    server_out / "best_model.npz",
+                )
+            else:
+                st["no_improve"] += 1
+
+            save_state(state_path, st)
+            print(
+                f"[Round {r:03d}] val_ap_weighted={val_ap_w:.6f} | "
+                f"best={st['best_val_ap']:.6f} @r{st['best_round']} | "
+                f"no_improve={st['no_improve']}"
+            )
+
+            if st["no_improve"] >= patience:
                 best_model = server_out / "best_model.npz"
                 print(
-                    f"EARLY STOP: no_improve={st.get('no_improve')} >= patience={patience} | "
-                    f"best_round={best_round} best_val_ap={best_val_ap:.6f} | model={best_model}"
+                    f"EARLY STOP: no_improve={st['no_improve']} >= patience={patience} | "
+                    f"best_round={st['best_round']} best_val_ap={st['best_val_ap']:.6f} | "
+                    f"model={best_model}"
                 )
                 break
 
-    return load_state(server_out / "server_state.json")
+    return st
 
 
 def evaluate_and_summary(
@@ -109,7 +182,7 @@ def evaluate_and_summary(
     use_latest: bool,
 ) -> None:
     for b in banks:
-        cmd = [str(REPO_ROOT / "scripts/04e_client_eval_best.py"), "--client", b]
+        cmd = [str(REPO_ROOT / "scripts/04f_client_eval_best.py"), "--client", b]
         if use_latest:
             cmd += ["--use_latest"]
         run(PY + cmd)
