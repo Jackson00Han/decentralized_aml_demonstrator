@@ -73,6 +73,9 @@ class FLCfg:
     patience: int
     alpha: float = 1e-4
     alpha_grid: List[float] = field(default_factory=list)
+    fk_key: bool = False
+    secure_agg_key: str = "simulated_secure_agg_key"
+    
 
 @dataclass(frozen=True)
 class SchemaCfg:
@@ -136,6 +139,9 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
     fl_patience = int(fl.get("patience", 3))
     alpha = float(fl.get("alpha", 1e-5))
     fl_alpha_grid = [float(x) for x in fl.get("alpha_grid", baseline_alpha_grid)]
+    secure_agg_key = fl.get("secure_agg_key", "")
+    fk_key = fl.get("fk_key", False)
+    
 
     out_fl_clients = _p(
         repo_root,
@@ -184,6 +190,8 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
             patience=fl_patience,
             alpha=alpha,
             alpha_grid=fl_alpha_grid,
+            fk_key=fk_key,
+            secure_agg_key=secure_agg_key,
         ),
         schema=SchemaCfg(version=schema_version, cat_cols=cat_cols, num_cols=num_cols),
     )

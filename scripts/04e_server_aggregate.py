@@ -1,3 +1,4 @@
+# 04e_server_aggregate.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,14 +12,12 @@ def main(round_id: int):
     from src.fl_aggregators import ClientUpdate, fedavg
     from src.config import load_config
     cfg = load_config()
-    SERVER_OUT = cfg.paths.out_fl_server
+    SERVER_OUT = cfg.paths.out_fl_server; SERVER_OUT.mkdir(parents=True, exist_ok=True)
     CLIENT_OUT = cfg.paths.out_fl_clients
-
-    SERVER_OUT.mkdir(parents=True, exist_ok=True)
 
     updates = []
     # gather all banks updates for this round
-    for upd in sorted(CLIENT_OUT.glob(f"*/updates/round_{round_id:03d}_update.npz")):
+    for upd in sorted(CLIENT_OUT.glob(f"*/updates/round_{round_id:03d}_update.npz")): 
         meta = load_meta_json(upd)
         if not meta or "n_train" not in meta:
             raise RuntimeError(f"Missing update meta or n_train: {upd}")
@@ -29,7 +28,7 @@ def main(round_id: int):
                 bank=bank,
                 n_train=int(meta["n_train"]),
                 params=params,
-                metrics={},
+                #metrics={},
             )
         )
 
@@ -53,7 +52,6 @@ def main(round_id: int):
 
     total_train = sum(u.n_train for u in updates)
     print(f"[Round {round_id:03d}] aggregated {len(updates)} clients | total_train={total_train}")
-
 
 if __name__ == "__main__":
     import argparse

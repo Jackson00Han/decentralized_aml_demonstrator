@@ -1,3 +1,4 @@
+# 04b_server_build_global_plan.py
 from __future__ import annotations
 
 import sys
@@ -25,7 +26,7 @@ def main():
     # collect stats
     stats_files = sorted(CLIENT_OUT.glob("*/stats.json"))
     if not stats_files:
-        raise RuntimeError("No client stats found. Run 04a_client_report_stats.py first.")
+        raise RuntimeError("No client stats found (train-only). Run 04a_client_report_stats.py first.")
 
     global_cats = {c: set() for c in CAT_COLS}
     agg = {c: {"n": 0, "sum": 0.0, "sumsq": 0.0} for c in NUM_COLS}
@@ -60,7 +61,7 @@ def main():
         global_numeric=global_numeric,
     )
     plan.dump(SERVER_OUT / "global_plan.json")
-    print(f"[OK] wrote {SERVER_OUT/'global_plan.json'}")
+    print(f"[OK] wrote {SERVER_OUT/'global_plan.json'} (train-only stats)")
 
 
 if __name__ == "__main__":

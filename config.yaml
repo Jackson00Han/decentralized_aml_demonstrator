@@ -26,6 +26,8 @@ baseline:
   out_dir: "outputs/local_baseline"
 
 fl:
+  fk_key: true
+  secure_agg_key: "simulated_secure_agg_key"
   num_rounds: 10
   local_epochs: 1
   patience: 3

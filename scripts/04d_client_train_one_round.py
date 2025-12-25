@@ -1,3 +1,4 @@
+# 04d_client_train_one_round.py
 from __future__ import annotations
 
 import hashlib
@@ -15,39 +16,8 @@ from src.config import load_config
 from src.fl_adapters import SkLogRegSGD
 from src.fl_protocol import GlobalPlan, load_params_npz, save_params_npz
 from src.metrics import ap
-
-
-def plan_hash(plan_path: Path) -> str:
-    return hashlib.sha1(plan_path.read_bytes()).hexdigest()
-
-
-def load_dataset(ds_dir: Path, expected_plan_hash: str) -> dict:
-    meta_path = ds_dir / "meta.json"
-    if not meta_path.exists():
-        raise FileNotFoundError(f"Missing dataset meta: {meta_path}")
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    if meta.get("plan_hash") != expected_plan_hash:
-        raise ValueError(
-            f"Plan hash mismatch for dataset {ds_dir} (expected {expected_plan_hash}, got {meta.get('plan_hash')})"
-        )
-
-    def _load_x(name: str):
-        return sparse.load_npz(ds_dir / f"{name}.npz")
-
-    def _load_y(name: str):
-        return np.load(ds_dir / f"{name}.npy", allow_pickle=False)
-
-    return {
-        "meta": meta,
-        "X_train": _load_x("X_train"),
-        "X_val": _load_x("X_val"),
-        "X_test": _load_x("X_test"),
-        "X_trainval": _load_x("X_trainval"),
-        "y_train": _load_y("y_train"),
-        "y_val": _load_y("y_val"),
-        "y_test": _load_y("y_test"),
-        "y_trainval": _load_y("y_trainval"),
-    }
+from src.utils import plan_hash, load_dataset
+from src.secure_agg import mask_metric_fraction
 
 
 def find_dataset_dir(bank: str, client_out: Path, expected_plan_hash: str) -> Path:
@@ -110,13 +80,36 @@ def main(
         d = X_tr.shape[1]
         params = {"coef": np.zeros((1, d), dtype=float), "intercept": np.zeros((1,), dtype=float)}
 
+################################## Core ################################################
     model = SkLogRegSGD(d=X_tr.shape[1], alpha=alpha, seed=seed + round_id)
     model.set_params(params)
     model.train_one_round(X_tr, y_tr, local_epochs=local_epochs, seed=seed + round_id)
-
     if not use_trainval:
         scores_va = model.predict_scores(X_va)
         val_ap = ap(y_va, scores_va)
+########################################################################################
+    participants = list(cfg.banks.names)
+
+    # Use weighted fraction components
+    num = float(val_ap) * float(val_n) if (val_ap is not None and int(val_n) > 0) else 0.0
+    den = float(val_n)
+
+    use_fk = bool(getattr(cfg.fl, "fk_key", False))
+    secret = None
+    if use_fk:
+        # Insecure simulation mode: store key in config
+        secret = str(getattr(cfg.fl, "secure_agg_key", "dev-only-insecure-key"))
+
+    # Mask numerator and denominator (server must NOT have FL_SECURE_AGG_KEY)
+    val_num_masked, val_den_masked = mask_metric_fraction(
+        numerator=num,
+        denominator=den,
+        me=bank,
+        participants=participants,
+        round_id=round_id,
+        scale=float(getattr(cfg.fl, "metrics_mask_scale", 1000.0)),
+        secret=secret,
+    )
 
     out_dir = client_out / bank / "updates"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -127,17 +120,17 @@ def main(
         meta={
             "bank": bank,
             "round": int(round_id),
+            "alpha": float(alpha),
             "n_train": int(n_train),
-            "val_n": int(val_n),
-            "val_pos": int(val_pos),
-            "val_ap": float(val_ap) if val_ap is not None else 0.0,
+            
+            "val_num_masked": val_num_masked,
+            "val_den_masked": val_den_masked,
+
             "schema_version": plan.schema_version,
             "split_rule": data["meta"].get("split_rule", "fixed_windows_2017_to_2018"),
         },
     )
     print(f"Client {bank} round {round_id} model update saved. val_ap={val_ap}")
-
-
 
 if __name__ == "__main__":
     import argparse

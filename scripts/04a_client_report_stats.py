@@ -1,3 +1,4 @@
+# 04a_client_report_stats.py
 from __future__ import annotations
 
 import sys
@@ -25,22 +26,22 @@ def main(bank: str):
     p = DATA_PROCESSED / bank / f"{bank}_merged.parquet"
     df = pd.read_parquet(p)
 
-    # Fixed-window split (UTC),
+    # Fixed-window split (UTC)
     tr, va, te, df_use = split_fixed_windows(df)
 
-    # stats must NOT use test to avoid leakage
-    tv = pd.concat([tr, va], ignore_index=True)
+    # stats must NOT use val/test to avoid leakage
+    tr_only = tr
 
-    # categorical vocab sets (train+val)
+    # categorical vocab sets (train only)
     cat_sets = {}
     for c in CAT_COLS:
         # normalize to string + dropna
-        cat_sets[c] = sorted(tv[c].dropna().astype(str).unique().tolist())
+        cat_sets[c] = sorted(tr_only[c].dropna().astype(str).unique().tolist())
 
-    # numeric stats (train+val): n, sum, sumsq -> server can aggregate to mean/std
+    # numeric stats (train only): n, sum, sumsq -> server can aggregate to mean/std
     num_stats = {}
     for c in NUM_COLS:
-        x = pd.to_numeric(tv[c], errors="coerce").to_numpy()
+        x = pd.to_numeric(tr_only[c], errors="coerce").to_numpy()
         x = x[np.isfinite(x)]
         n = int(x.size)
         s = float(x.sum()) if n else 0.0
