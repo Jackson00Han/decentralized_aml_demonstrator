@@ -1,14 +1,12 @@
-# 04_fl_train_with_early_stopping.py
+# 04_fl_train.py
 from __future__ import annotations
 
 import json
 import subprocess
 import sys
 from pathlib import Path
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(REPO_ROOT))
-
 from src.config import load_config
 from src.fl_protocol import load_params_npz, save_params_npz
 
@@ -32,9 +30,6 @@ def run(cmd, *, quiet: bool = True):
             proc.check_returncode()
         return
     subprocess.run(list(map(str, cmd)), check=True)
-
-
-
 
 def aggregate_round_val_ap_secure(client_out: Path, round_id: int, alpha: float, banks: list[str]) -> float:
     """
@@ -91,17 +86,17 @@ def main():
 
     # 1) client train-only stats
     for bank in cfg.banks.names:
-        run(PY + [str(REPO_ROOT / "scripts" / "04a_client_report_stats.py"), "--client", bank], quiet=True)
+        run(PY + [str(REPO_ROOT / "scripts" / "04a_fl_client_report_stats.py"), "--client", bank], quiet=True)
 
     # 2) server builds global plan
-    run(PY + [str(REPO_ROOT / "scripts" / "04b_server_build_global_plan.py")], quiet=True)
+    run(PY + [str(REPO_ROOT / "scripts" / "04b_fl_server_build_global_plan.py")], quiet=True)
 
     # 3) clients build aligned datasets
     for bank in cfg.banks.names:
         run(
             PY
             + [
-                str(REPO_ROOT / "scripts" / "04c_client_initialization.py"),
+                str(REPO_ROOT / "scripts" / "04c_fl_client_initialize.py"),
                 "--client",
                 bank,
                 "--overwrite",
@@ -113,7 +108,7 @@ def main():
     patience = cfg.fl.patience
     num_rounds = cfg.fl.num_rounds
 
-    best_model_with_alpha: list[dict] = []
+    best_overall = {"alpha": None, "round_id": 0, "val_ap": -float("inf"), "model_path": ""}
 
     for alpha in alpha_grid:
         print(f"\n[alpha={alpha:.0e}]")
@@ -125,26 +120,23 @@ def main():
         delete_path = server_out / "global_model_latest.npz"
         if delete_path.exists():
             delete_path.unlink()
-
+        best_alpha_model = {"alpha": alpha, "round_id": 0, "val_ap": -float("inf"), "model_path": ""}
         for round_id in range(1, num_rounds + 1):
             # 4) clients train one round and write updates + metric meta
             for bank in cfg.banks.names:
                 run(
-                    PY
-                    + [
-                        str(REPO_ROOT / "scripts" / "04d_client_train_one_round.py"),
-                        "--client",
-                        bank,
-                        "--round_id",
-                        round_id,
-                        "--alpha",
-                        alpha,
+                    PY +
+                    [
+                        str(REPO_ROOT / "scripts" / "04d_fl_client_train_round.py"),
+                        "--client", bank,
+                        "--round_id", round_id,
+                        "--alpha", alpha,
                     ],
                     quiet=True,
                 )
 
             # 5) server aggregates model params (FedAvg)
-            run(PY + [str(REPO_ROOT / "scripts" / "04e_server_aggregate.py"), "--round_id", round_id], quiet=True)
+            run(PY + [str(REPO_ROOT / "scripts" / "04e_fl_server_aggregate.py"), "--round_id", round_id], quiet=True)
 
             # 6) federated evaluation: server aggregates ONLY metrics from meta.json
             avg_val_ap = aggregate_round_val_ap_secure(client_out, round_id, alpha, banks=list(cfg.banks.names))
@@ -170,7 +162,7 @@ def main():
                         "avg_val_ap": float(best_val_ap),
                     },
                 )
-                best_model_with_alpha.append(
+                best_alpha_model.update(
                     {"alpha": alpha, "round_id": round_id, "val_ap": best_val_ap, "model_path": best_model_path}
                 )
             else:
@@ -192,13 +184,13 @@ def main():
             f"[alpha={alpha:.0e}] best_round={best_round:02d} best_val_ap={best_val_ap:.6f} "
             f"rounds_run={round_id:02d} early_stop={no_improve>=patience}"
         )
+        if best_alpha_model["val_ap"] > best_overall["val_ap"]:
+            best_overall = best_alpha_model
 
-
-    best_model = max(best_model_with_alpha, key=lambda x: x["val_ap"])
     print(
-        f"Best overall model: alpha={best_model['alpha']:.6f}, "
-        f"round={best_model['round_id']}, val AP={best_model['val_ap']:.6f}, "
-        f"model path={best_model['model_path']}"
+        f"Best overall model: alpha={best_overall['alpha']:.6f}, "
+        f"round={best_overall['round_id']}, val AP={best_overall['val_ap']:.6f}, "
+        f"model path={best_overall['model_path']}"
     )
     print("Training completed.")
 

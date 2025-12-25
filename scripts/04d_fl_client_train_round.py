@@ -17,7 +17,7 @@ from src.fl_adapters import SkLogRegSGD
 from src.fl_protocol import GlobalPlan, load_params_npz, save_params_npz
 from src.metrics import ap
 from src.utils import plan_hash, load_dataset
-from src.secure_agg import mask_metric_fraction
+from src.fl_secure_agg import mask_metric_fraction
 
 
 def find_dataset_dir(bank: str, client_out: Path, expected_plan_hash: str) -> Path:
