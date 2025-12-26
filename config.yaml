@@ -2,7 +2,7 @@ project:
   seed: 42
 
 banks:
-  names: ["bank_a", "bank_b", "bank_c"]
+  names: ["bank_s", "bank_m", "bank_l"]
   amlsim_config_dir: "configs/amlsim"
 
 paths:
