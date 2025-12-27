@@ -1,7 +1,7 @@
 {
   "general": {
     "random_seed": 0,
-    "simulation_name": "three_banks_124516",
+    "simulation_name": "three_banks_100K",
     "total_steps": 720,
     "base_date": "2017-01-01"
   },
@@ -40,7 +40,6 @@
     "schema": "schema.json",
     "accounts": "accounts.csv",
     "alert_patterns": "alertPatterns.csv",
-    "normal_models": "normalModels.csv",
     "degree": "degree.csv",
     "transaction_type": "transactionType.csv",
     "is_aggregated_accounts": true
@@ -88,4 +87,3 @@
     "diameter": "diameter.png"
   }
 }
-
