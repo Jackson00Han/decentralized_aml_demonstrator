@@ -30,6 +30,47 @@ def fmt(x: float | None, nd: int = 6) -> str:
         return "NA"
     return f"{float(x):.{nd}f}"
 
+import numpy as np
+
+def precision_recall_f1_at_threshold(y_true: np.ndarray, scores: np.ndarray, thr: float):
+    """Compute P/R/F1 for a given threshold."""
+    y_hat = (scores >= thr).astype(int)
+
+    tp = int(np.sum((y_hat == 1) & (y_true == 1)))
+    fp = int(np.sum((y_hat == 1) & (y_true == 0)))
+    fn = int(np.sum((y_hat == 0) & (y_true == 1)))
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    return precision, recall, f1
+
+def best_f1_threshold(y_true: np.ndarray, scores: np.ndarray):
+    """
+    Pick threshold that maximizes F1 on the given set.
+    Tie-break: higher precision, then higher recall.
+    """
+    # Important: if scores are not probabilities, do NOT add "1.1" / "0" sentinels.
+    thresholds = np.unique(scores)
+    thresholds.sort()
+    thresholds = thresholds[::-1]  # high -> low
+
+    best_thr = float(thresholds[0])
+    best_p, best_r, best_f1 = 0.0, 0.0, -1.0
+
+    for thr in thresholds:
+        p, r, f1 = precision_recall_f1_at_threshold(y_true, scores, float(thr))
+        if (f1 > best_f1 + 1e-12) or (abs(f1 - best_f1) <= 1e-12 and (p > best_p + 1e-12)) or \
+           (abs(f1 - best_f1) <= 1e-12 and abs(p - best_p) <= 1e-12 and (r > best_r + 1e-12)):
+            best_thr, best_p, best_r, best_f1 = float(thr), float(p), float(r), float(f1)
+
+    return best_thr, best_p, best_r, best_f1
+
+
+
+
+
+
 def main() -> None:
 
     OUT_ROOT = cfg.paths.out_local_baseline; OUT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -111,66 +152,32 @@ def main() -> None:
                 if no_improve >= patience:
                     break
             cand.append((float(alpha), best_val_ap, best_params, best_round))
-
+    
         best_alpha, best_val_ap, best_params, best_round = max(cand, key=lambda x: x[1])
-        tune_str = " | ".join([f"alpha={c:g}: {avp:.6f}@r{r}" for c, avp, _, r in cand])
-        print(f"Tune alpha (val AP): {tune_str}")
-        print(f"Selected: alpha={best_alpha:g} (val_AP={best_val_ap:.6f})")
+        print(f"best alpha={best_alpha:g} | val_ap={best_val_ap:.6f} at round {best_round} ")
 
         if best_params is None:
             raise RuntimeError(f"{bank}: no model params saved for alpha={best_alpha:g}")
         model = SkLogRegSGD(d=X_test.shape[1], alpha=best_alpha, seed=seed)
         model.set_params(best_params)
+
+        # 1) Select threshold on validation set
+        val_scores = model.predict_scores(X_val)
+        thr, p_val, r_val, f1_val = best_f1_threshold(y_val, val_scores)
+        print(f"Selected threshold on val: thr={thr:.6f} | P={p_val:.4f} R={r_val:.4f} F1={f1_val:.4f}")
+
+
+        # 2) Evaluate on test with that threshold
         test_scores = model.predict_scores(X_test)
-        test_ap = float(ap(y_test, test_scores)) if y_test.sum() > 0 else 0.0
         test_auc = safe_roc_auc(y_test, test_scores)
-        rep = topk_report(y_test, test_scores, k=TOP_K)
-        print(f"Test AP: {fmt(test_ap)} | Test ROC AUC: {fmt(test_auc)}")
-        print("Top-k report:")
-        print(json.dumps(rep, indent=2, sort_keys=True))
+        p_test, r_test, f1_test = precision_recall_f1_at_threshold(y_test, test_scores, thr)
+        test_ap = float(ap(y_test, test_scores)) if y_test.sum() > 0 else 0.0
+        
+        print(f"Test results: test_ap={test_ap:.6f} F1={f1_test:.4f} AUC={test_auc:.6f} | P={p_test:.4f} R={r_test:.4f}")
 
-        bank_out = OUT_ROOT / bank; bank_out.mkdir(parents=True, exist_ok=True)
 
-        metrics = {
-            "bank": bank,
-            "selected_alpha": best_alpha,
-            "selected_round": best_round,
-            "val_ap_best": best_val_ap,
-            "test_ap": test_ap,
-            "test_roc_auc": test_auc,
-            "topk": rep,
-        }
 
-        out_json = bank_out / "val_test_report.json"
-        out_json.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-        print(f"Saved: {out_json}")
 
-        summary_rows.append(
-            {
-                "bank": bank,
-                "test_ap": test_ap,
-                "roc_auc": test_auc if test_auc is not None else np.nan,
-                "pos": rep["pos"],
-                "n": rep["n"],
-                f"hits@{rep['k']}": rep["hits"],
-                f"expected_hits_random@{rep['k']}": rep["expected_hits_random"],
-                f"P@{rep['k']}": rep["precision_at_k"],
-                f"base_P@{rep['k']}": rep["baseline_precision_at_k"],
-                f"R@{rep['k']}": rep["recall_at_k"],
-                f"base_R@{rep['k']}": rep["baseline_recall_at_k"],
-                f"liftP@{rep['k']}": rep["lift_precision_at_k"] if rep["lift_precision_at_k"] is not None else np.nan,
-                "selected_alpha": best_alpha,
-                "selected_round": best_round,
-            }
-        )
-
-    summary_df = pd.DataFrame(summary_rows).sort_values("bank")
-    out_csv = OUT_ROOT / "summary.csv"
-    summary_df.to_csv(out_csv, index=False)
-    print("\n" + "=" * 68)
-    print("Summary")
-    print("=" * 68)
-    print(summary_df.to_string(index=False))
 
 if __name__ == "__main__":
     main()

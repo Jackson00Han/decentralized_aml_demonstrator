@@ -111,10 +111,25 @@ class SkLogRegSGD(ModelAdapter):
             self.clf.partial_fit(X_train[idx], y_train[idx]) # like backforward step of deep learning
 
     def predict_scores(self, X) -> np.ndarray:
+        """
+        Return P(y=1) with numerical stabilization to avoid exact 0/1 saturation.
+        """
+        if not self._inited:
+            raise RuntimeError("Model not initialized. Call train/fit or set_params first.")
         self._assert_dim(X)
-        # decision_function is stable for sparse/dense
+
+        # decision_function returns raw logits (can be very large in magnitude)
         z = self.clf.decision_function(X)
-        return expit(z)
+
+        # Clip logits to prevent overflow/underflow in exp
+        z = np.clip(z, -30.0, 30.0)
+
+        p = 1.0 / (1.0 + np.exp(-z))
+
+        # Avoid exact 0/1 which can make threshold selection degenerate
+        eps = 1e-6
+        p = np.clip(p, eps, 1.0 - eps)
+        return p
 
 
 # new adapters go here:
