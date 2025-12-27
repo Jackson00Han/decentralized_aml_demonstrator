@@ -86,12 +86,16 @@ def main(
     model.train_one_round(X_tr, y_tr, local_epochs=local_epochs, seed=seed + round_id)
     if not use_trainval:
         scores_va = model.predict_scores(X_va)
-        val_ap = ap(y_va, scores_va)
+        p = scores_va
+        y = y_va.astype(float)
+        loss = -(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
+        val_logloss_sum = float(loss.sum()) # we use logloss as metric
+
 ########################################################################################
     participants = list(cfg.banks.names)
 
     # Use weighted fraction components
-    num = float(val_ap) * float(val_n) if (val_ap is not None and int(val_n) > 0) else 0.0
+    num = float(val_logloss_sum) * float(val_n) if (val_ap is not None and int(val_n) > 0) else 0.0
     den = float(val_n)
 
     use_fk = bool(getattr(cfg.fl, "fk_key", False))
@@ -130,13 +134,13 @@ def main(
             "split_rule": data["meta"].get("split_rule", "fixed_windows_2017_to_2018"),
         },
     )
-    print(f"Client {bank} round {round_id} model update saved. val_ap={val_ap}")
+    print(f"Client {bank} round {round_id} model update saved. val_logloss_sum={val_logloss_sum:.4f}")
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--client", default="bank_a")
+    parser.add_argument("--client", default="bank_l")
     parser.add_argument("--round_id", type=int, default=1)
     parser.add_argument("--data_dir", default=None, help="dataset dir from 04c_1_client_initialization.py")
     parser.add_argument("--alpha", type=float, default=None, help="override fl.alpha for this run")

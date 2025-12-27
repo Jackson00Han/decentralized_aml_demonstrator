@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
 from src.config import load_config
-from src.data_splits import split_fixed_windows
+from src.data import split_stratified
 from src.fl_protocol import GlobalPlan
 from src.fl_preprocess import build_preprocessor
 
@@ -32,19 +32,29 @@ def main(bank: str, out_dir: str | None = None, overwrite: bool = False) -> None
 
     plan = GlobalPlan.load(plan_path)
     preprocess = build_preprocessor(plan)
+    train_frac = cfg.schema.train_frac
+    val_frac = cfg.schema.val_frac
+    test_frac = cfg.schema.test_frac
 
     data_processed = cfg.paths.data_processed
-    df = pd.read_parquet(data_processed / bank / f"{bank}_merged.parquet")
-    tr, va, te, df_use = split_fixed_windows(df, ts_col="tran_timestamp")
+    df = pd.read_parquet(data_processed / bank / "processed.parquet")
+    tr, va, te = split_stratified(
+        df,
+        label_col="is_sar",
+        train_frac=train_frac,
+        val_frac=val_frac,
+        test_frac=test_frac,
+        seed=cfg.project.seed,
+    )
 
     feat_cols = plan.feature_schema.num_cols + plan.feature_schema.cat_cols
     X_train = preprocess.transform(tr[feat_cols])
     X_val = preprocess.transform(va[feat_cols])
     X_test = preprocess.transform(te[feat_cols])
 
-    y_train = tr["y"].astype(int).to_numpy()
-    y_val = va["y"].astype(int).to_numpy()
-    y_test = te["y"].astype(int).to_numpy()
+    y_train = tr["is_sar"].astype(int).to_numpy()
+    y_val = va["is_sar"].astype(int).to_numpy()
+    y_test = te["is_sar"].astype(int).to_numpy()
 
     X_trainval = sparse.vstack([X_train, X_val])
     y_trainval = np.concatenate([y_train, y_val])
@@ -70,13 +80,13 @@ def main(bank: str, out_dir: str | None = None, overwrite: bool = False) -> None
         "schema_version": plan.schema_version,
         "feature_dim": int(X_train.shape[1]),
         "counts": {
-            "data_used_n": int(len(df_use)),
+            "data_used_n": int(len(df)),
             "train_n": int(len(tr)),
             "val_n": int(len(va)),
             "test_n": int(len(te)),
-            "train_pos": int(tr["y"].sum()),
-            "val_pos": int(va["y"].sum()),
-            "test_pos": int(te["y"].sum()),
+            "train_pos": int(tr["is_sar"].sum()),
+            "val_pos": int(va["is_sar"].sum()),
+            "test_pos": int(te["is_sar"].sum()),
         }
     }
     (ds_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -87,7 +97,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--client", default="bank_a")
+    parser.add_argument("--client", default="bank_s")
     parser.add_argument("--out_dir", default=None, help="override output dir for dataset")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()

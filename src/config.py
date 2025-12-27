@@ -82,6 +82,10 @@ class SchemaCfg:
     version: str
     cat_cols: List[str]
     num_cols: List[str]
+    train_frac: float
+    val_frac: float
+    test_frac: float
+    
 
 @dataclass(frozen=True)
 class ProjectCfg:
@@ -163,6 +167,11 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
     schema_version = str(schema.get("version", "v1"))
     cat_cols = list(schema.get("cat_cols", []))
     num_cols = list(schema.get("num_cols", []))
+    data_splits = raw.get("data_splits", {})
+    train_frac = float(data_splits.get("train_frac", 0.7))
+    val_frac = float(data_splits.get("val_frac", 0.2))
+    test_frac = float(data_splits.get("test_frac", 0.1))
+    
 
     return Config(
         project=ProjectCfg(seed=seed),
@@ -193,5 +202,12 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
             fk_key=fk_key,
             secure_agg_key=secure_agg_key,
         ),
-        schema=SchemaCfg(version=schema_version, cat_cols=cat_cols, num_cols=num_cols),
+        schema=SchemaCfg(
+            version=schema_version, 
+            cat_cols=cat_cols,
+            num_cols=num_cols,
+            train_frac=train_frac,
+            val_frac=val_frac,
+            test_frac=test_frac,
+        ),
     )

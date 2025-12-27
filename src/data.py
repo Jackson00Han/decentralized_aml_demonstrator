@@ -1,10 +1,8 @@
-# src/data_splits.py
+# src/data.py
 from __future__ import annotations
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
-
-
 
 def split_stratified(
     df: pd.DataFrame,

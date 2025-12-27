@@ -4,14 +4,11 @@ from __future__ import annotations
 import sys
 import json
 from pathlib import Path
-
 import numpy as np
-
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
 
 def main():
-
-    ROOT = Path(__file__).resolve().parents[1]
-    sys.path.append(str(ROOT))
     from src.fl_protocol import GlobalPlan, FeatureSchema
     from src.config import load_config
     cfg = load_config()

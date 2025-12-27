@@ -7,27 +7,35 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+from src.config import load_config
+from src.data import split_stratified
 
 def main(bank: str):
-    ROOT = Path(__file__).resolve().parents[1]
-    sys.path.append(str(ROOT))
-    from src.config import load_config
-    from src.data_splits import split_fixed_windows
 
     cfg = load_config()
-
     DATA_PROCESSED = cfg.paths.data_processed
     CLIENT_OUT = cfg.paths.out_fl_clients
 
     CAT_COLS = cfg.schema.cat_cols
     NUM_COLS = cfg.schema.num_cols
+    train_frac = cfg.schema.train_frac
+    val_frac = cfg.schema.val_frac
+    test_frac = cfg.schema.test_frac
 
-    p = DATA_PROCESSED / bank / f"{bank}_merged.parquet"
+    p = DATA_PROCESSED / bank / "processed.parquet"
     df = pd.read_parquet(p)
 
     # Fixed-window split (UTC)
-    tr, va, te, df_use = split_fixed_windows(df)
+    tr, va, te = split_stratified(
+        df,
+        label_col="is_sar",
+        train_frac=train_frac,
+        val_frac=val_frac,
+        test_frac=test_frac,
+        seed=cfg.project.seed,
+    )
 
     # stats must NOT use val/test to avoid leakage
     tr_only = tr
@@ -53,13 +61,13 @@ def main(bank: str):
         "cat_sets": cat_sets,
         "num_stats": num_stats,
         "counts": {
-            "data_used_n": int(len(df_use)),
+            "data_used_n": int(len(df)),
             "train_n": int(len(tr)),
             "val_n": int(len(va)),
             "test_n": int(len(te)),
-            "train_pos": int(tr["y"].sum()),
-            "val_pos": int(va["y"].sum()),
-            "test_pos": int(te["y"].sum()),
+            "train_pos": int(tr["is_sar"].sum()),
+            "val_pos": int(va["is_sar"].sum()),
+            "test_pos": int(te["is_sar"].sum()),
         }
     }
 
@@ -70,6 +78,6 @@ def main(bank: str):
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--client", default='bank_a') # default bank_a for a quick test
+    ap.add_argument("--client", default='bank_s') # default bank_a for a quick test
     args = ap.parse_args()
     main(args.client)

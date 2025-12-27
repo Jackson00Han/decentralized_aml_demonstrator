@@ -14,34 +14,36 @@ def safe_roc_auc(y_true: np.ndarray, scores: np.ndarray) -> float | None:
     return float(roc_auc_score(y_true, scores))
 
 
-def topk_report(y_true: np.ndarray, scores: np.ndarray, k: int) -> dict:
-    n = len(y_true)
-    k = int(min(k, n))
-    order = np.argsort(-scores)
-    top = y_true[order[:k]]
+def precision_recall_f1_at_threshold(y_true: np.ndarray, scores: np.ndarray, thr: float):
+    """Compute P/R/F1 for a given threshold."""
+    y_hat = (scores >= thr).astype(int)
 
-    pos = int(y_true.sum())
-    hits = int(top.sum())
-    p_at_k = hits / k if k > 0 else 0.0
-    r_at_k = hits / pos if pos > 0 else 0.0
+    tp = int(np.sum((y_hat == 1) & (y_true == 1)))
+    fp = int(np.sum((y_hat == 1) & (y_true == 0)))
+    fn = int(np.sum((y_hat == 0) & (y_true == 1)))
 
-    base_p = pos / n if n > 0 else 0.0
-    base_r = k / n if n > 0 else 0.0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    return precision, recall, f1
 
-    lift_p = (p_at_k / base_p) if base_p > 0 else None
-    lift_r = (r_at_k / base_r) if base_r > 0 else None
+def best_f1_threshold(y_true: np.ndarray, scores: np.ndarray):
+    """
+    Pick threshold that maximizes F1 on the given set.
+    Tie-break: higher precision, then higher recall.
+    """
+    # Important: if scores are not probabilities, do NOT add "1.1" / "0" sentinels.
+    thresholds = np.unique(scores)
+    thresholds.sort()
+    thresholds = thresholds[::-1]  # high -> low
 
-    return {
-        "n": n,
-        "pos": pos,
-        "k": k,
-        "hits": hits,
-        "precision_at_k": p_at_k,
-        "recall_at_k": r_at_k,
-        "baseline_precision_at_k": base_p,
-        "baseline_recall_at_k": base_r,
-        "lift_precision_at_k": lift_p,
-        "lift_recall_at_k": lift_r,
-        "expected_hits_random": k * base_p,
-    }
+    best_thr = float(thresholds[0])
+    best_p, best_r, best_f1 = 0.0, 0.0, -1.0
 
+    for thr in thresholds:
+        p, r, f1 = precision_recall_f1_at_threshold(y_true, scores, float(thr))
+        if (f1 > best_f1 + 1e-12) or (abs(f1 - best_f1) <= 1e-12 and (p > best_p + 1e-12)) or \
+           (abs(f1 - best_f1) <= 1e-12 and abs(p - best_p) <= 1e-12 and (r > best_r + 1e-12)):
+            best_thr, best_p, best_r, best_f1 = float(thr), float(p), float(r), float(f1)
+
+    return best_thr, best_p, best_r, best_f1

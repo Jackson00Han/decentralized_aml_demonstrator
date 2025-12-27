@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 import sys
@@ -12,9 +10,9 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(REPO_ROOT))
 from src.config import load_config
-from src.data_splits import split_stratified
+from src.data import split_stratified
 from src.fl_adapters import SkLogRegSGD
-from src.metrics import ap, safe_roc_auc, topk_report
+from src.metrics import ap, safe_roc_auc, precision_recall_f1_at_threshold, best_f1_threshold
 from src.fl_preprocess import build_local_preprocessor
 cfg = load_config()
 DATA_PROCESSED = cfg.paths.data_processed
@@ -30,41 +28,6 @@ def fmt(x: float | None, nd: int = 6) -> str:
         return "NA"
     return f"{float(x):.{nd}f}"
 
-import numpy as np
-
-def precision_recall_f1_at_threshold(y_true: np.ndarray, scores: np.ndarray, thr: float):
-    """Compute P/R/F1 for a given threshold."""
-    y_hat = (scores >= thr).astype(int)
-
-    tp = int(np.sum((y_hat == 1) & (y_true == 1)))
-    fp = int(np.sum((y_hat == 1) & (y_true == 0)))
-    fn = int(np.sum((y_hat == 0) & (y_true == 1)))
-
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-    return precision, recall, f1
-
-def best_f1_threshold(y_true: np.ndarray, scores: np.ndarray):
-    """
-    Pick threshold that maximizes F1 on the given set.
-    Tie-break: higher precision, then higher recall.
-    """
-    # Important: if scores are not probabilities, do NOT add "1.1" / "0" sentinels.
-    thresholds = np.unique(scores)
-    thresholds.sort()
-    thresholds = thresholds[::-1]  # high -> low
-
-    best_thr = float(thresholds[0])
-    best_p, best_r, best_f1 = 0.0, 0.0, -1.0
-
-    for thr in thresholds:
-        p, r, f1 = precision_recall_f1_at_threshold(y_true, scores, float(thr))
-        if (f1 > best_f1 + 1e-12) or (abs(f1 - best_f1) <= 1e-12 and (p > best_p + 1e-12)) or \
-           (abs(f1 - best_f1) <= 1e-12 and abs(p - best_p) <= 1e-12 and (r > best_r + 1e-12)):
-            best_thr, best_p, best_r, best_f1 = float(thr), float(p), float(r), float(f1)
-
-    return best_thr, best_p, best_r, best_f1
 
 
 
@@ -74,7 +37,6 @@ def best_f1_threshold(y_true: np.ndarray, scores: np.ndarray):
 def main() -> None:
 
     OUT_ROOT = cfg.paths.out_local_baseline; OUT_ROOT.mkdir(parents=True, exist_ok=True)
-    TOP_K = cfg.baseline.top_k
     ALPHA_GRID = cfg.baseline.alpha_grid
     max_rounds = cfg.baseline.max_rounds
     patience = cfg.baseline.patience
