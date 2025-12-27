@@ -62,7 +62,7 @@ def main(
         y_tr = data["y_trainval"].astype(int)
         val_n = 0
         val_pos = 0
-        val_ap = None
+        val_logloss_sum = None
         n_train = int(len(y_tr))
     else:
         X_tr = data["X_train"]
@@ -73,6 +73,7 @@ def main(
         val_pos = int(y_va.sum())
         n_train = int(len(y_tr))
 
+    # Load global model parameters
     global_model_path = server_out / "global_model_latest.npz"
     if global_model_path.exists():
         params = load_params_npz(global_model_path)
@@ -86,16 +87,28 @@ def main(
     model.train_one_round(X_tr, y_tr, local_epochs=local_epochs, seed=seed + round_id)
     if not use_trainval:
         scores_va = model.predict_scores(X_va)
-        p = scores_va
+        eps = 1e-6
+        p = np.clip(scores_va, eps, 1.0 - eps)
         y = y_va.astype(float)
         loss = -(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
-        val_logloss_sum = float(loss.sum()) # we use logloss as metric
-
+        val_logloss_sum = float(loss.sum())
+    # update model parameters
+    update_params = model.get_params()
 ########################################################################################
-    participants = list(cfg.banks.names)
+    out_dir = client_out / bank / "updates"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    save_params_npz(
+        out_dir / f"round_{round_id:03d}_update.npz",
+        update_params,
+    )
+    msg = "NA" if val_logloss_sum is None else f"{val_logloss_sum:.4f}"
+    print(f"Client {bank} round {round_id} model update saved. val_logloss_sum={msg}")
 
-    # Use weighted fraction components
-    num = float(val_logloss_sum) * float(val_n) if (val_ap is not None and int(val_n) > 0) else 0.0
+
+
+    participants = list(cfg.banks.names)
+    # Metric fraction for secure aggregation: mean logloss = sum_loss / n
+    num = float(val_logloss_sum) if (val_logloss_sum is not None and val_n > 0) else 0.0
     den = float(val_n)
 
     use_fk = bool(getattr(cfg.fl, "fk_key", False))
@@ -114,28 +127,19 @@ def main(
         scale=float(getattr(cfg.fl, "metrics_mask_scale", 1000.0)),
         secret=secret,
     )
+    meta={
+        "bank": bank,
+        "round": int(round_id),
+        "alpha": float(alpha),
+        "n_train": int(n_train),
+        
+        "val_num_masked": val_num_masked,
+        "val_den_masked": val_den_masked,
 
-    out_dir = client_out / bank / "updates"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    update_params = model.get_params()
-    save_params_npz(
-        out_dir / f"round_{round_id:03d}_update.npz",
-        update_params,
-        meta={
-            "bank": bank,
-            "round": int(round_id),
-            "alpha": float(alpha),
-            "n_train": int(n_train),
-            
-            "val_num_masked": val_num_masked,
-            "val_den_masked": val_den_masked,
-
-            "schema_version": plan.schema_version,
-            "split_rule": data["meta"].get("split_rule", "fixed_windows_2017_to_2018"),
-        },
-    )
-    print(f"Client {bank} round {round_id} model update saved. val_logloss_sum={val_logloss_sum:.4f}")
-
+        "schema_version": plan.schema_version,
+        "split_rule": data["meta"].get("split_rule", "fixed_windows_2017_to_2018"),
+    },
+    
 if __name__ == "__main__":
     import argparse
 
