@@ -2,72 +2,72 @@
 from __future__ import annotations
 
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 
-def split_fixed_windows(df: pd.DataFrame, ts_col: str = "tran_timestamp"):
+
+def split_stratified(
+    df: pd.DataFrame,
+    label_col: str = "is_sar",
+    train_frac: float = 0.7,
+    val_frac: float = 0.15,
+    test_frac: float = 0.15,
+    seed: int = 42,
+):
     """
-    Fixed time split (UTC):
-    - Train: ts < 2018-05-01
-    - Val:   2018-05-01 <= ts < 2018-09-01
-    - Test:  2018-09-01 <= ts < 2019-01-01
+    Random stratified split for account-level classification.
     Returns: (train_df, val_df, test_df, df_used)
     """
+    if abs((train_frac + val_frac + test_frac) - 1.0) > 1e-6:
+        raise ValueError("train/val/test fractions must sum to 1.0")
+    if train_frac <= 0 or val_frac <= 0 or test_frac <= 0:
+        raise ValueError("train/val/test fractions must be positive")
+
     df = df.copy()
-    df[ts_col] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
-    df = df[df[ts_col].notna()].copy()
+    df = df[df[label_col].notna()].copy()
+    if df.empty:
+        raise ValueError("No rows available after dropping missing labels")
 
-    start_date = pd.Timestamp("2017-01-01", tz="UTC")
-    start_may = pd.Timestamp("2018-05-01", tz="UTC")
-    start_sep = pd.Timestamp("2018-09-01", tz="UTC")
-    start_2019 = pd.Timestamp("2019-01-01", tz="UTC")
+    y = df[label_col].astype(int)
+    test_size = val_frac + test_frac
 
-    df_used = df[(df[ts_col] >= start_date) & (df[ts_col] < start_2019)].copy()
+    class_counts = y.value_counts()
+    can_stratify = len(class_counts) >= 2 and class_counts.min() >= 2
 
-    tr = df_used[df_used[ts_col] < start_may].copy()
-    va = df_used[(df_used[ts_col] >= start_may) & (df_used[ts_col] < start_sep)].copy()
-    te = df_used[df_used[ts_col] >= start_sep].copy()
-
-    if len(tr) + len(va) + len(te) != len(df_used):
-        raise RuntimeError("Time split sanity check failed: overlap or drop detected.")
-
-    return tr, va, te, df_used
-
-import pandas as pd
-
-def build_account_features(tx: pd.DataFrame, ts_col: str = "tran_timestamp") -> pd.DataFrame:
-    """
-    Minimal account-level aggregation for MVP.
-    Required columns: orig_acct, bene_acct, base_amt, tran_timestamp
-    Returns: DataFrame indexed by acct_id.
-    """
-    tx = tx.copy()
-
-
-    out = (
-        tx.groupby("orig_acct")
-        .agg(
-            out_cnt=("tran_id", "size"),
-            out_amt_sum=("base_amt", "sum"),
-            out_uniq_bene=("bene_acct", "nunique"),
+    if can_stratify:
+        tr, temp = train_test_split(
+            df,
+            test_size=test_size,
+            random_state=seed,
+            shuffle=True,
+            stratify=y,
         )
-        .rename_axis("acct_id")
-    )
-
-    inn = (
-        tx.groupby("bene_acct")
-        .agg(
-            in_cnt=("tran_id", "size"),
-            in_amt_sum=("base_amt", "sum"),
-            in_uniq_orig=("orig_acct", "nunique"),
+    else:
+        tr, temp = train_test_split(
+            df,
+            test_size=test_size,
+            random_state=seed,
+            shuffle=True,
         )
-        .rename_axis("acct_id")
-    )
 
-    feats = out.join(inn, how="outer").fillna(0)
+    temp_y = temp[label_col].astype(int)
+    temp_counts = temp_y.value_counts()
+    temp_can_stratify = len(temp_counts) >= 2 and temp_counts.min() >= 2
 
-    feats["net_flow"] = feats["in_amt_sum"] - feats["out_amt_sum"]
-    feats["turnover"] = feats["in_amt_sum"] + feats["out_amt_sum"]
-    feats["uniq_total"] = feats["out_uniq_bene"] + feats["in_uniq_orig"]
+    if temp_can_stratify:
+        va, te = train_test_split(
+            temp,
+            test_size=test_frac / test_size,
+            random_state=seed,
+            shuffle=True,
+            stratify=temp_y,
+        )
+    else:
+        va, te = train_test_split(
+            temp,
+            test_size=test_frac / test_size,
+            random_state=seed,
+            shuffle=True,
+        )
 
-    return feats.sort_index()
-
+    return tr, va, te

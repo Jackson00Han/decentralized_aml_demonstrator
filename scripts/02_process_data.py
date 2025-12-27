@@ -1,17 +1,16 @@
 import pandas as pd
 import os
+import sys
+import shutil
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(REPO_ROOT))
+
 
 def main():
-    import sys
-    import shutil
-    from pathlib import Path
-    REPO_ROOT = Path(__file__).resolve().parents[1]
-    sys.path.append(str(REPO_ROOT))
+
     from src.config import load_config
-    from src.data_splits import split_fixed_windows, build_account_features
     cfg = load_config()
-
-
     # process each bank's data
     bank_lists = cfg.banks.names
     for bank in bank_lists:

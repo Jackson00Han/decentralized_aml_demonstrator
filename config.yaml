@@ -19,7 +19,7 @@ preprocess:
     - state
 
 baseline:
-  top_k: 500
+  top_k: 100
   alpha_grid: [1e-3, 1e-4, 1e-5]
   max_rounds: 10
   patience: 3
@@ -36,5 +36,6 @@ fl:
 
 schema:
   version: "v1"
-  cat_cols: ["orig_state", "bene_state"]
-  num_cols: ["base_amt", "orig_initial_deposit", "bene_initial_deposit"]
+  cat_cols: ['state']
+  num_cols: ['initial_deposit', 'out_cnt', 'out_sum', 'in_cnt', 'in_sum']
+  #num_cols: ['initial_deposit', 'out_cnt', 'out_sum', 'out_nuniq_bene', 'in_cnt', 'in_sum', 'in_nuniq_orig', 'net_flow', 'out_max_daily_cnt', 'out_max_daily_sum', 'in_max_daily_cnt', 'in_max_daily_sum']

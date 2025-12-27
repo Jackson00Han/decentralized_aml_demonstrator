@@ -12,7 +12,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(REPO_ROOT))
 from src.config import load_config
-from src.data_splits import split_fixed_windows
+from src.data_splits import split_stratified
 from src.fl_adapters import SkLogRegSGD
 from src.metrics import ap, safe_roc_auc, topk_report
 from src.fl_preprocess import build_local_preprocessor
@@ -39,9 +39,11 @@ def main() -> None:
     patience = cfg.baseline.patience
     local_epochs = cfg.fl.local_epochs
     seed = cfg.project.seed
+
     cat_cols = cfg.schema.cat_cols
     num_cols = cfg.schema.num_cols
     feat_cols = num_cols + cat_cols
+    label_col = "is_sar"
 
     banks = find_banks()
     if not banks:
@@ -50,19 +52,26 @@ def main() -> None:
     summary_rows: list[dict] = []
 
     for bank in banks:
-        in_path = DATA_PROCESSED / bank / f"{bank}_merged.parquet"
+        in_path = DATA_PROCESSED / bank / "processed.parquet"
         if not in_path.exists():
             raise FileNotFoundError(f"Missing processed file: {in_path}")
 
         df = pd.read_parquet(in_path)
 
-        if "y" not in df.columns or "tran_timestamp" not in df.columns:
-            raise KeyError(f"{bank}: missing required columns y / tran_timestamp")
+        if label_col not in df.columns:
+            raise KeyError(f"{bank}: missing required columns {label_col}")
 
-        train_df, val_df, test_df, df_use = split_fixed_windows(df, ts_col="tran_timestamp")
-        y_train = train_df["y"].astype(int).to_numpy()
-        y_val = val_df["y"].astype(int).to_numpy()
-        y_test = test_df["y"].astype(int).to_numpy()
+        train_df, val_df, test_df = split_stratified(
+            df,
+            label_col=label_col,
+            train_frac=0.7,
+            val_frac=0.15,
+            test_frac=0.15,
+            seed=seed,
+        )
+        y_train = train_df[label_col].astype(int).to_numpy()
+        y_val = val_df[label_col].astype(int).to_numpy()
+        y_test = test_df[label_col].astype(int).to_numpy()
 
         preprocess = build_local_preprocessor(cat_cols, num_cols)
         preprocess.fit(train_df[feat_cols])
