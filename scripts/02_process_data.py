@@ -20,7 +20,6 @@ def main():
         if out_dir.exists():
             shutil.rmtree(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-
         
         df_accs = pd.read_csv(cfg.paths.data_raw / bank / "accounts.csv")
         df_trans = pd.read_csv(cfg.paths.data_raw / bank / "transactions.csv")
@@ -32,80 +31,83 @@ def main():
         df_sar = df_sar.drop_duplicates().reset_index(drop=True)
 
         # process accounts data
-        df_accs = df_accs[['acct_id', 'initial_deposit', 'state']]
+        ac_used = df_accs[['acct_id', 'initial_deposit', 'state']].copy()
+        ac_used['acct_id'] = pd.to_numeric(ac_used['acct_id'], errors='coerce').astype('Int32')
+        ac_used['initial_deposit'] = pd.to_numeric(ac_used['initial_deposit'], errors='coerce').astype('float32')
+        ac_used['state'] = ac_used['state'].astype('category')
 
         # process transactions
-        df_trans = df_trans[['tran_id', 'tran_timestamp', 'orig_acct', 'bene_acct', 'base_amt', 'is_sar']]
+        df_trans = df_trans[['tran_id', 'tran_timestamp', 'orig_acct', 'bene_acct', 'base_amt']]
         df_trans['tran_timestamp'] = pd.to_datetime(df_trans['tran_timestamp'], utc=True, errors='coerce')
-        df_trans['orig_acct'] = pd.to_numeric(df_trans['orig_acct'], errors='coerce').astype('Int32')
-        df_trans['bene_acct'] = pd.to_numeric(df_trans['bene_acct'], errors='coerce').astype('Int32')
-        df_trans['base_amt'] = pd.to_numeric(df_trans['base_amt'], errors='coerce').astype('float32')
+        tx_used = df_trans.sort_values('tran_timestamp').reset_index(drop=True)
+        tx_used['orig_acct'] = pd.to_numeric(tx_used['orig_acct'], errors='coerce').astype('Int32')
+        tx_used['bene_acct'] = pd.to_numeric(tx_used['bene_acct'], errors='coerce').astype('Int32')
+        tx_used['base_amt'] = pd.to_numeric(tx_used['base_amt'], errors='coerce').astype('float32')
 
-        # split df_trans into train, val, test
-        from src.data_splits import split_fixed_windows
-        tr, va, te, df_2018_used = split_fixed_windows(df_trans, ts_col="tran_timestamp")
-        print(f"Bank {bank}: {len(tr)} train, {len(va)} val, {len(te)} test transactions.")
+        # process SAR accounts
+        sar_used = df_sar[['ACCOUNT_ID', 'IS_SAR']].copy()
+        sar_used['ACCOUNT_ID'] = pd.to_numeric(sar_used['ACCOUNT_ID'], errors='coerce').astype('Int32')
+        sar_used = sar_used[sar_used['IS_SAR'] == "YES"]
+        sar_set = set(sar_used['ACCOUNT_ID'].unique())
 
-        # make account features
-        from src.data_splits import build_account_features
-        tr_acct_feats = build_account_features(tr, ts_col="tran_timestamp").reset_index()
-        va_acct_feats = build_account_features(va, ts_col="tran_timestamp").reset_index()
-        te_acct_feats = build_account_features(te, ts_col="tran_timestamp").reset_index()
-        print(f"Bank {bank}: {len(tr_acct_feats)} train, {len(va_acct_feats)} val, {len(te_acct_feats)} test account features.")
+        # add label to accounts
+        ac_used['is_sar'] = ac_used['acct_id'].isin(sar_set)
 
-        # merge account features with accounts data
-        accs_tr = df_accs.merge(tr_acct_feats, on='acct_id', how='left')
-        accs_va = df_accs.merge(va_acct_feats, on='acct_id', how='left')
-        accs_te = df_accs.merge(te_acct_feats, on='acct_id', how='left')
-        feat_cols = [
-            "out_cnt",
-            "out_amt_sum",
-            "out_uniq_bene",
-            "in_cnt",
-            "in_amt_sum",
-            "in_uniq_orig",
-            "net_flow",
-            "turnover",
-            "uniq_total",
-        ]
-        accs_tr[feat_cols] = accs_tr[feat_cols].fillna(0)
-        accs_va[feat_cols] = accs_va[feat_cols].fillna(0)
-        accs_te[feat_cols] = accs_te[feat_cols].fillna(0)
-        print(f"Bank {bank}: {len(accs_tr)} train, {len(accs_va)} val, {len(accs_te)} test accounts after merge.")
+        # aggregation
+        ac_out = tx_used.groupby('orig_acct').agg(
+            out_cnt = ('tran_id', 'size'),
+            out_sum = ('base_amt', 'sum'),
+            out_nuniq_bene = ('bene_acct', 'nunique'),
+        ).rename_axis('acct_id').reset_index()
 
-        # add sar label to accounts (use SAR event date cutoffs)
-        df_sar = df_sar.copy()
+        ac_in = tx_used.groupby('bene_acct').agg(
+            in_cnt = ('tran_id', 'size'),
+            in_sum = ('base_amt', 'sum'),
+            in_nuniq_orig = ('orig_acct', 'nunique') 
+        ).rename_axis('acct_id').reset_index()
 
-        # Ensure datetime (AMLSim SAR dates are YYYYMMDD)
-        df_sar["EVENT_DATE"] = pd.to_datetime(
-            df_sar["EVENT_DATE"].astype(str),
-            format="%Y%m%d",
-            utc=True,
-            errors="coerce",
-        )
+        # merge in and out features
+        ac_features = ac_used.merge(ac_out, how='left', on='acct_id')
+        ac_features = ac_features.merge(ac_in, how='left', on='acct_id')
 
-        # Ensure ids comparable
-        sar_ids = pd.to_numeric(df_sar["ACCOUNT_ID"], errors="coerce").astype("Int32")
+        # fill NaN with 0 for transaction features
+        tx_feature_cols = ['out_cnt', 'out_sum', 'out_nuniq_bene', 'in_cnt', 'in_sum', 'in_nuniq_orig']
+        ac_features[tx_feature_cols] = ac_features[tx_feature_cols].fillna(0)
 
-        cut_tr = pd.Timestamp("2018-05-01", tz="UTC")
-        cut_va = pd.Timestamp("2018-09-01", tz="UTC")
-        cut_te = pd.Timestamp("2019-01-01", tz="UTC")  # end exclusive for 2018-12-31
+        # derived features
+        ac_features['net_flow'] = ac_features['in_sum'] - ac_features['out_sum']
 
-        sar_tr_set = set(sar_ids[df_sar["EVENT_DATE"] < cut_tr].dropna().tolist())
-        sar_va_set = set(sar_ids[df_sar["EVENT_DATE"] < cut_va].dropna().tolist())
-        sar_te_set = set(sar_ids[df_sar["EVENT_DATE"] < cut_te].dropna().tolist())
+        # burst features, aggregate transactions over each day
+        tx_used['date'] = tx_used['tran_timestamp'].dt.floor('D')
+        out_daily = tx_used.groupby(['orig_acct', 'date']).agg(
+            daily_out_sum = ('base_amt', 'sum'),
+            daily_out_cnt = ('tran_id', 'size')
+        ).reset_index()
+        out_burst = out_daily.groupby('orig_acct').agg(
+            out_max_daily_cnt = ('daily_out_cnt', 'max'),
+            out_max_daily_sum = ('daily_out_sum', 'max')
+        ).rename_axis('acct_id').reset_index()
 
-        accs_tr["is_sar"] = accs_tr["acct_id"].astype("Int32").isin(sar_tr_set)
-        accs_va["is_sar"] = accs_va["acct_id"].astype("Int32").isin(sar_va_set)
-        accs_te["is_sar"] = accs_te["acct_id"].astype("Int32").isin(sar_te_set)
+        in_daily = tx_used.groupby(['bene_acct', 'date']).agg(
+            daily_in_sum = ('base_amt', 'sum'),
+            daily_in_cnt = ('tran_id', 'size')
+        ).reset_index()
+        in_burst = in_daily.groupby('bene_acct').agg(
+            in_max_daily_cnt = ('daily_in_cnt', 'max'),
+            in_max_daily_sum = ('daily_in_sum', 'max')
+        ).rename_axis('acct_id').reset_index()
 
+        ac_features = ac_features.merge(out_burst, how='left', on='acct_id')
+        ac_features = ac_features.merge(in_burst, how='left', on='acct_id')
+        ac_features[['out_max_daily_cnt', 'out_max_daily_sum', 'in_max_daily_cnt', 'in_max_daily_sum']] = ac_features[['out_max_daily_cnt', 'out_max_daily_sum', 'in_max_daily_cnt', 'in_max_daily_sum']].fillna(0)
 
-        # save processed data
-        accs_tr.to_csv(out_dir / "accounts_train.csv", index=False)
-        accs_va.to_csv(out_dir / "accounts_val.csv", index=False)
-        accs_te.to_csv(out_dir / "accounts_test.csv", index=False)
+        # sanity check
+        assert ac_features['acct_id'].nunique() == ac_used['acct_id'].nunique(), "Account count mismatch after feature engineering"
 
-        print(f"Processed data for bank {bank} saved to {out_dir}")
+        # save processed data as parquet format
+        ac_features.to_parquet(out_dir / "processed.parquet", index=False)
+        
+        print(f"Processed data for {bank} saved to {out_dir / 'processed.parquet'}")
 
 
 if __name__ == "__main__":
