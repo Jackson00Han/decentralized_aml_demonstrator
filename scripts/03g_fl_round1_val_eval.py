@@ -44,11 +44,12 @@ def aggregate_round_val_logloss_secure(
     den_key: str = "metric_den_masked",
 ) -> float:
     """
-    Server-side secure aggregation of validation logloss (weighted mean by val_n).
+    Server-side secure aggregation of validation weighted logloss (mean = Σsum_wloss / Σsum_w).
     Requires each client to have run scripts/03f_fl_evaluation.py and written:
-      outputs/fl_clients/{bank}/eval/round_XXX_val_logloss.meta.json
+      outputs/fl_clients/{bank}/eval/round_XXX_val_wlogloss.meta.json
     """
-    meta_files = sorted(client_out.glob(f"*/eval/round_{round_id:03d}_val_logloss.meta.json"))
+    meta_files = sorted(client_out.glob(f"*/eval/round_{round_id:03d}_val_wlogloss.meta.json"))
+
     if not meta_files:
         raise RuntimeError(f"No evaluation meta files found for round {round_id:03d}")
 
@@ -91,7 +92,7 @@ def aggregate_round_val_logloss_secure(
 def main(round_id: int = 1, alpha: float | None = None, verbose: bool = False, from_scratch: bool = False) -> None:
     server_out = cfg.paths.out_fl_server
     client_out = cfg.paths.out_fl_clients
-    banks = list(cfg.banks.names)
+    banks = sorted(cfg.banks.names)
 
     alpha = float(alpha) if alpha is not None else float(cfg.fl.alpha)
 
@@ -172,21 +173,21 @@ def main(round_id: int = 1, alpha: float | None = None, verbose: bool = False, f
             quiet=quiet,
         )
 
-    avg_val_logloss_global = aggregate_round_val_logloss_secure(
-        client_out, round_id, alpha, banks=list(cfg.banks.names), num_key="metric_num_masked", den_key="metric_den_masked"
+    avg_val_wlogloss_global = aggregate_round_val_logloss_secure(
+        client_out, round_id, alpha, banks=banks, num_key="metric_num_masked", den_key="metric_den_masked"
     )
-    avg_val_logloss_local = aggregate_round_val_logloss_secure(
+    avg_val_wlogloss_local = aggregate_round_val_logloss_secure(
         client_out,
         round_id,
         alpha,
-        banks=list(cfg.banks.names),
+        banks=banks,
         num_key="local_metric_num_masked",
         den_key="local_metric_den_masked",
     )
     print(
         f"\nround={round_id:03d} alpha={alpha:g} "
-        f"avg_local_val_logloss={avg_val_logloss_local:.6f} "
-        f"avg_global_val_logloss={avg_val_logloss_global:.6f}"
+        f"avg_local_val_wlogloss={avg_val_wlogloss_local:.6f} "
+        f"avg_global_val_wlogloss={avg_val_wlogloss_global:.6f}"
     )
 
 

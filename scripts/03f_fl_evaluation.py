@@ -5,8 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
@@ -15,7 +13,7 @@ from src.fl_adapters import SkLogRegSGD
 from src.fl_protocol import GlobalPlan, load_params_npz
 from src.fl_secure_agg import mask_value
 from src.utils import load_dataset, plan_hash
-
+from src.metrics import weighted_logloss_sums, class_balance_weights
 
 def find_dataset_dir(bank: str, client_out: Path, expected_plan_hash: str) -> Path:
     base = client_out / bank / "datasets"
@@ -27,15 +25,6 @@ def find_dataset_dir(bank: str, client_out: Path, expected_plan_hash: str) -> Pa
     if not candidates:
         raise FileNotFoundError(f"No dataset matching {prefix} under {base} (run scripts/04c_fl_client_initialize.py)")
     return max(candidates, key=lambda p: p.stat().st_mtime)
-
-
-def logloss_sum(y_true: np.ndarray, p: np.ndarray) -> float:
-    eps = 1e-6
-    p = np.clip(p.astype(float), eps, 1.0 - eps)
-    y = y_true.astype(float)
-    loss = -(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
-    return float(loss.sum())
-
 
 def main(
     bank: str,
@@ -58,8 +47,6 @@ def main(
 
     model_path = server_out / "global_models" / f"round_{round_id:03d}.npz"
     if not model_path.exists():
-        model_path = server_out / "global_model_latest.npz"
-    if not model_path.exists():
         raise FileNotFoundError(f"Missing global model for round {round_id}: {model_path} (run scripts/04e_fl_server_aggregate.py)")
 
     params = load_params_npz(model_path)
@@ -74,6 +61,8 @@ def main(
     X_val = data["X_val"]
     y_val = data["y_val"].astype(int)
     val_n = int(len(y_val))
+    val_pos = int(y_val.sum())
+    w_pos, w_neg = class_balance_weights(val_n, val_pos)
 
     alpha = float(alpha_override) if alpha_override is not None else float(cfg.fl.alpha)
     seed = int(cfg.project.seed)
@@ -81,58 +70,78 @@ def main(
     global_model = SkLogRegSGD(d=X_val.shape[1], alpha=alpha, seed=seed + int(round_id))
     global_model.set_params(params)
     global_p_val = global_model.predict_scores(X_val)
-    val_logloss_sum = logloss_sum(y_val, global_p_val) if val_n > 0 else 0.0
+
+    global_sum_wloss, global_sum_w = weighted_logloss_sums(
+        y_true=y_val,
+        p_pred=global_p_val,
+        w_pos=w_pos,
+        w_neg=w_neg,
+    )
+
 
     local_model = SkLogRegSGD(d=X_val.shape[1], alpha=alpha, seed=seed + int(round_id))
     local_model.set_params(local_params)
     local_p_val = local_model.predict_scores(X_val)
-    local_val_logloss_sum = logloss_sum(y_val, local_p_val) if val_n > 0 else 0.0
+    local_sum_wloss, local_sum_w = weighted_logloss_sums(
+        y_true=y_val,
+        p_pred=local_p_val,
+        w_pos=w_pos,
+        w_neg=w_neg,
+    )
 
-    participants = list(cfg.banks.names)
+    participants = sorted(cfg.banks.names)
     use_fk = bool(getattr(cfg.fl, "fk_key", False))
     secret = str(getattr(cfg.fl, "secure_agg_key", "")) if use_fk else None
     scale = float(getattr(cfg.fl, "metrics_mask_scale", 1000.0))
 
     num_masked = mask_value(
-        val_logloss_sum,
+        global_sum_wloss,
         me=bank,
         participants=participants,
         round_id=round_id,
-        tag="global_val_logloss_sum",
+        tag="global_val_wlogloss_sum",
         scale=scale,
         secret=secret,
     )
     den_masked = mask_value(
-        float(val_n),
+        global_sum_w,
         me=bank,
         participants=participants,
         round_id=round_id,
-        tag="val_logloss_n",
+        tag="global_val_wsum",
         scale=scale,
         secret=secret,
     )
 
     local_num_masked = mask_value(
-        local_val_logloss_sum,
+        local_sum_wloss,
         me=bank,
         participants=participants,
         round_id=round_id,
-        tag="local_val_logloss_sum",
+        tag="local_val_wlogloss_sum",
         scale=scale,
         secret=secret,
     )
-    local_den_masked = den_masked
+    local_den_masked = mask_value(
+        local_sum_w,
+        me=bank,
+        participants=participants,
+        round_id=round_id,
+        tag="local_val_wsum",
+        scale=scale,
+        secret=secret,
+    )
 
     out_dir = client_out / bank / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"round_{round_id:03d}_val_logloss.meta.json"
+    out_path = out_dir / f"round_{round_id:03d}_val_wlogloss.meta.json"
     out_path.write_text(
         json.dumps(
             {
                 "bank": bank,
                 "round": int(round_id),
                 "alpha": float(alpha),
-                "metric": "val_logloss",
+                "metric": "val_wlogloss",
                 "metric_num_masked": float(num_masked),
                 "metric_den_masked": float(den_masked),
                 "local_metric_num_masked": float(local_num_masked),

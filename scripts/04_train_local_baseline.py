@@ -13,7 +13,14 @@ sys.path.append(str(ROOT))
 from src.config import load_config
 from src.fl_adapters import SkLogRegSGD
 from src.fl_protocol import GlobalPlan, save_params_npz
-from src.metrics import ap, best_f1_threshold, precision_recall_f1_at_threshold, safe_roc_auc
+from src.metrics import (
+    ap,
+    best_f1_threshold,
+    precision_recall_f1_at_threshold,
+    safe_roc_auc,
+    weighted_logloss_sums,
+    class_balance_weights,
+)
 from src.utils import load_dataset, plan_hash
 
 
@@ -35,14 +42,10 @@ def find_dataset_dir(bank: str, client_out: Path, expected_plan_hash: str) -> Pa
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
-def logloss_mean(y_true: np.ndarray, p: np.ndarray) -> float:
-    if len(y_true) == 0:
-        return 0.0
-    eps = 1e-6
-    p = np.clip(p.astype(float), eps, 1.0 - eps)
-    y = y_true.astype(float)
-    loss = -(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
-    return float(loss.mean())
+def wlogloss_mean(y_true: np.ndarray, p: np.ndarray, w_pos: float, w_neg: float) -> float:
+    """Weighted logloss mean using class-balance weights."""
+    sum_wloss, sum_w = weighted_logloss_sums(y_true, p, w_pos=w_pos, w_neg=w_neg)
+    return float(sum_wloss / sum_w) if sum_w > 0 else 0.0
 
 
 def train_select_best(
@@ -51,6 +54,8 @@ def train_select_best(
     y_train: np.ndarray,
     X_val,
     y_val: np.ndarray,
+    w_pos: float,
+    w_neg: float,
     alpha_grid: list[float],
     max_rounds: int,
     patience: int,
@@ -60,7 +65,7 @@ def train_select_best(
     candidates: list[dict] = []
     for alpha in alpha_grid:
         model = SkLogRegSGD(d=X_train.shape[1], alpha=float(alpha), seed=int(seed))
-        best_val_logloss = float("inf")
+        best_val_wlogloss = float("inf")
         best_val_ap = None
         best_params = None
         best_round = 0
@@ -69,11 +74,11 @@ def train_select_best(
         for r in range(1, int(max_rounds) + 1):
             model.train_one_round(X_train, y_train, local_epochs=int(local_epochs), seed=int(seed) + int(r))
             val_scores = model.predict_scores(X_val)
-            val_ll = logloss_mean(y_val, val_scores)
+            val_ll = wlogloss_mean(y_val, val_scores, w_pos=w_pos, w_neg=w_neg)
             val_ap = float(ap(y_val, val_scores)) if y_val.sum() > 0 else 0.0
 
-            if val_ll < best_val_logloss - 1e-12:
-                best_val_logloss = float(val_ll)
+            if val_ll < best_val_wlogloss - 1e-12:
+                best_val_wlogloss = float(val_ll)
                 best_val_ap = float(val_ap)
                 best_params = model.get_params()
                 best_round = int(r)
@@ -90,13 +95,13 @@ def train_select_best(
             {
                 "alpha": float(alpha),
                 "selected_round": int(best_round),
-                "val_logloss_best": float(best_val_logloss),
+                "val_wlogloss_best": float(best_val_wlogloss),
                 "val_ap_at_best": float(best_val_ap) if best_val_ap is not None else None,
                 "params": best_params,
             }
         )
 
-    return min(candidates, key=lambda x: x["val_logloss_best"])
+    return min(candidates, key=lambda x: x["val_wlogloss_best"])
 
 
 def main(client: str | None = None, save_model: bool = True) -> None:
@@ -132,6 +137,13 @@ def main(client: str | None = None, save_model: bool = True) -> None:
         y_val = data["y_val"].astype(int)
         X_test = data["X_test"]
         y_test = data["y_test"].astype(int)
+        val_n = int(len(y_val))
+        val_pos = int(y_val.sum())
+        test_n = int(len(y_test))
+        test_pos = int(y_test.sum())
+
+        w_pos_val, w_neg_val = class_balance_weights(val_n, val_pos)
+        w_pos_test, w_neg_test = class_balance_weights(test_n, test_pos)
 
         print("\n" + "=" * 68)
         print(f"Local baseline (same split as 04c) | {bank}")
@@ -147,6 +159,8 @@ def main(client: str | None = None, save_model: bool = True) -> None:
             y_train=y_train,
             X_val=X_val,
             y_val=y_val,
+            w_pos=w_pos_val,
+            w_neg=w_neg_val,
             alpha_grid=alpha_grid,
             max_rounds=max_rounds,
             patience=patience,
@@ -156,12 +170,12 @@ def main(client: str | None = None, save_model: bool = True) -> None:
 
         best_alpha = float(best["alpha"])
         best_round = int(best["selected_round"])
-        best_val_logloss = float(best["val_logloss_best"])
+        best_val_wlogloss = float(best["val_wlogloss_best"])
         best_params = best["params"]
 
         print(
-            f"Selected by val_logloss: alpha={best_alpha:g} round={best_round:03d} "
-            f"val_logloss={best_val_logloss:.6f}"
+            f"Selected by val_wlogloss: alpha={best_alpha:g} round={best_round:03d} "
+            f"val_wlogloss={best_val_wlogloss:.6f}"
         )
 
         model = SkLogRegSGD(d=X_train.shape[1], alpha=best_alpha, seed=seed)
@@ -169,7 +183,7 @@ def main(client: str | None = None, save_model: bool = True) -> None:
 
         val_scores = model.predict_scores(X_val)
         val_ap = float(ap(y_val, val_scores)) if y_val.sum() > 0 else 0.0
-        val_logloss = logloss_mean(y_val, val_scores)
+        val_wlogloss = wlogloss_mean(y_val, val_scores, w_pos=w_pos_val, w_neg=w_neg_val)
 
         if len(y_val) == 0:
             thr = 0.5
@@ -180,15 +194,15 @@ def main(client: str | None = None, save_model: bool = True) -> None:
         test_scores = model.predict_scores(X_test)
         test_ap = float(ap(y_test, test_scores)) if y_test.sum() > 0 else 0.0
         test_auc = safe_roc_auc(y_test, test_scores)
-        test_logloss = logloss_mean(y_test, test_scores)
+        test_wlogloss = wlogloss_mean(y_test, test_scores, w_pos=w_pos_test, w_neg=w_neg_test)
         p_test, r_test, f1_test = precision_recall_f1_at_threshold(y_test, test_scores, float(thr))
 
         print(
-            f"Val:  logloss={val_logloss:.6f} ap={val_ap:.6f} "
+            f"Val:  wlogloss={val_wlogloss:.6f} ap={val_ap:.6f} "
             f"| thr={float(thr):.6f} P={p_val:.4f} R={r_val:.4f} F1={f1_val:.4f}"
         )
         print(
-            f"Test: logloss={test_logloss:.6f} ap={test_ap:.6f} auc={fmt(test_auc)} "
+            f"Test: wlogloss={test_wlogloss:.6f} ap={test_ap:.6f} auc={fmt(test_auc)} "
             f"| P={p_test:.4f} R={r_test:.4f} F1={f1_test:.4f}"
         )
 
@@ -197,24 +211,26 @@ def main(client: str | None = None, save_model: bool = True) -> None:
 
         report = {
             "bank": bank,
-            "selection_metric": "val_logloss",
+            "selection_metric": "val_wlogloss",
             "selected_alpha": best_alpha,
             "selected_round": best_round,
-            "val_logloss_best": best_val_logloss,
+            "val_wlogloss_best": best_val_wlogloss,
             "val_ap_at_best": float(best.get("val_ap_at_best")) if best.get("val_ap_at_best") is not None else None,
             "train_n": int(len(y_train)),
             "train_pos": int(y_train.sum()),
-            "val_n": int(len(y_val)),
-            "val_pos": int(y_val.sum()),
-            "test_n": int(len(y_test)),
-            "test_pos": int(y_test.sum()),
+            "val_n": val_n,
+            "val_pos": val_pos,
+            "test_n": test_n,
+            "test_pos": test_pos,
             "val_threshold": float(thr),
             "val_p": float(p_val),
             "val_r": float(r_val),
             "val_f1": float(f1_val),
-            "val_logloss": float(val_logloss),
+            "val_wlogloss": float(val_wlogloss),
+            "val_logloss": float(val_wlogloss),  # backward-compat field name
             "val_ap": float(val_ap),
-            "test_logloss": float(test_logloss),
+            "test_wlogloss": float(test_wlogloss),
+            "test_logloss": float(test_wlogloss),  # backward-compat field name
             "test_ap": float(test_ap),
             "test_roc_auc": float(test_auc) if test_auc is not None else None,
             "test_p": float(p_test),
@@ -235,7 +251,7 @@ def main(client: str | None = None, save_model: bool = True) -> None:
                     "selection_metric": "val_logloss",
                     "selected_alpha": best_alpha,
                     "selected_round": best_round,
-                    "val_logloss_best": best_val_logloss,
+                    "val_wlogloss_best": best_val_wlogloss,
                     "plan_hash": expected_hash,
                     "schema_version": plan.schema_version,
                 },
@@ -244,18 +260,18 @@ def main(client: str | None = None, save_model: bool = True) -> None:
         summary_rows.append(
             {
                 "bank": bank,
-                "selected_alpha": best_alpha,
-                "selected_round": best_round,
-                "val_logloss_best": best_val_logloss,
+                #"sld_alpha": best_alpha,
+                "sld_round": best_round,
+                "val_wlogloss_best": best_val_wlogloss,
                 "val_ap": val_ap,
-                "test_logloss": test_logloss,
+                "test_wlogloss": test_wlogloss,
                 "test_ap": test_ap,
                 "test_roc_auc": test_auc if test_auc is not None else np.nan,
                 "test_f1": f1_test,
                 "test_p": p_test,
                 "test_r": r_test,
-                "test_n": int(len(y_test)),
-                "test_pos": int(y_test.sum()),
+                "test_n": test_n,
+                "test_pos": test_pos,
             }
         )
 
@@ -279,4 +295,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(client=args.client, save_model=not args.no_save_model)
-

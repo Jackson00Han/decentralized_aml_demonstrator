@@ -33,13 +33,13 @@ def run(cmd, *, quiet: bool = True):
 
 def aggregate_round_val_logloss_secure(client_out: Path, round_id: int, alpha: float, banks: list[str]) -> float:
     """
-    Secure aggregation of validation logloss (weighted mean by val_n):
-      Each client writes masked components:
-        - metric_num_masked = (sum_logloss) + mask
-        - metric_den_masked = (val_n) + mask
-      Server only sums masked values; masks cancel if all clients participate.
+    Secure aggregation of validation weighted logloss (mean = Σsum_wloss / Σsum_w).
+    Clients write masked components:
+      - metric_num_masked = sum_wloss + mask
+      - metric_den_masked = sum_w     + mask
+    Server only sums masked values; masks cancel if all clients participate.
     """
-    meta_files = sorted(client_out.glob(f"*/eval/round_{round_id:03d}_val_logloss.meta.json"))
+    meta_files = sorted(client_out.glob(f"*/eval/round_{round_id:03d}_val_wlogloss.meta.json"))
     if not meta_files:
         raise RuntimeError(f"No evaluation meta files found for round {round_id:03d}")
 
@@ -108,12 +108,12 @@ def main():
     patience = cfg.fl.patience
     num_rounds = cfg.fl.num_rounds
 
-    best_overall = {"alpha": None, "round_id": 0, "val_logloss": float("inf"), "model_path": ""}
+    best_overall = {"alpha": None, "round_id": 0, "val_wlogloss": float("inf"), "model_path": ""}
 
     for alpha in alpha_grid:
         print(f"\n[alpha={alpha:.0e}]")
         no_improve = 0
-        best_val_logloss = float("inf")
+        best_val_wlogloss = float("inf")
         best_round = 0
 
         # reset global model pointer
@@ -123,10 +123,10 @@ def main():
 
         metrics_dir = server_out / "metrics"
         metrics_dir.mkdir(parents=True, exist_ok=True)
-        metrics_path = metrics_dir / f"val_logloss_alpha{float(alpha):.6f}.jsonl"
+        metrics_path = metrics_dir / f"val_wlogloss_alpha{float(alpha):.6f}.jsonl"
         metrics_path.write_text("", encoding="utf-8")
 
-        best_alpha_model = {"alpha": alpha, "round_id": 0, "val_logloss": float("inf"), "model_path": ""}
+        best_alpha_model = {"alpha": alpha, "round_id": 0, "val_wlogloss": float("inf"), "model_path": ""}
         for round_id in range(1, num_rounds + 1):
             # 4) clients train one round and write updates
             for bank in cfg.banks.names:
@@ -161,21 +161,26 @@ def main():
                 )
 
             # 7) federated evaluation: server aggregates ONLY masked metrics
-            avg_val_logloss = aggregate_round_val_logloss_secure(
+            avg_val_wlogloss = aggregate_round_val_logloss_secure(
                 client_out, round_id, alpha, banks=list(cfg.banks.names)
             )
             with metrics_path.open("a", encoding="utf-8") as f:
                 f.write(
                     json.dumps(
-                        {"alpha": float(alpha), "round": int(round_id), "avg_val_logloss": float(avg_val_logloss)}
+                        {
+                            "alpha": float(alpha),
+                            "round": int(round_id),
+                            "avg_val_wlogloss": float(avg_val_wlogloss),
+                            "avg_val_logloss": float(avg_val_wlogloss),  # backward compatibility
+                        }
                     )
                     + "\n"
                 )
 
             # 8) early stopping
-            is_new_best = avg_val_logloss < best_val_logloss
+            is_new_best = avg_val_wlogloss < best_val_wlogloss
             if is_new_best:
-                best_val_logloss = avg_val_logloss
+                best_val_wlogloss = avg_val_wlogloss
                 best_round = round_id
                 no_improve = 0
 
@@ -190,14 +195,15 @@ def main():
                     meta={
                         "alpha": float(alpha),
                         "round_id": int(round_id),
-                        "avg_val_logloss": float(best_val_logloss),
+                        "avg_val_wlogloss": float(best_val_wlogloss),
+                        "avg_val_logloss": float(best_val_wlogloss),  # backward compatibility
                     },
                 )
                 best_alpha_model.update(
                     {
                         "alpha": alpha,
                         "round_id": round_id,
-                        "val_logloss": best_val_logloss,
+                        "val_wlogloss": best_val_wlogloss,
                         "model_path": best_model_path,
                     }
                 )
@@ -207,25 +213,25 @@ def main():
             tag = " new_best" if is_new_best else ""
             print(
                 f"alpha={alpha:.0e} round={round_id:02d}/{num_rounds} "
-                f"avg_val_logloss={avg_val_logloss:.6f} best={best_val_logloss:.6f} no_improve={no_improve}{tag}"
+                f"avg_val_wlogloss={avg_val_wlogloss:.6f} best={best_val_wlogloss:.6f} no_improve={no_improve}{tag}"
             )
 
             if no_improve >= patience:
                 print(
-                    f"[alpha={alpha:.0e}] early_stop round={round_id:02d} best_val_logloss={best_val_logloss:.6f}"
+                    f"[alpha={alpha:.0e}] early_stop round={round_id:02d} best_val_wlogloss={best_val_wlogloss:.6f}"
                 )
                 break
 
         print(
-            f"[alpha={alpha:.0e}] best_round={best_round:02d} best_val_logloss={best_val_logloss:.6f} "
+            f"[alpha={alpha:.0e}] best_round={best_round:02d} best_val_wlogloss={best_val_wlogloss:.6f} "
             f"rounds_run={round_id:02d} early_stop={no_improve>=patience}"
         )
-        if best_alpha_model["val_logloss"] < best_overall["val_logloss"]:
+        if best_alpha_model["val_wlogloss"] < best_overall["val_wlogloss"]:
             best_overall = best_alpha_model
 
     print(
         f"Best overall model: alpha={best_overall['alpha']:.6f}, "
-        f"round={best_overall['round_id']}, val logloss={best_overall['val_logloss']:.6f}, "
+        f"round={best_overall['round_id']}, val wlogloss={best_overall['val_wlogloss']:.6f}, "
         f"model path={best_overall['model_path']}"
     )
     print("Training completed.")

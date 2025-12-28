@@ -49,54 +49,50 @@ def best_f1_threshold(y_true: np.ndarray, scores: np.ndarray):
     return best_thr, best_p, best_r, best_f1
 
 
-def topk_report(y_true: np.ndarray, scores: np.ndarray, k: int) -> dict:
+import numpy as np
+
+
+def weighted_logloss_sums(
+    y_true: np.ndarray,
+    p_pred: np.ndarray,
+    w_pos: float,
+    w_neg: float,
+    eps: float = 1e-6,
+) -> tuple[float, float]:
     """
-    Report top-k performance for rare-event detection use-cases.
+    Weighted binary cross-entropy (logloss) aggregation-friendly form.
+
+    Returns:
+      - sum_weighted_loss = Σ w_i * loss_i
+      - sum_weights       = Σ w_i
+
+    So global weighted mean logloss can be computed by secure-agg:
+      global = Σ(sum_weighted_loss) / Σ(sum_weights)
     """
-    y_true = np.asarray(y_true).astype(int)
-    scores = np.asarray(scores).astype(float)
+    y = y_true.astype(float)
+    p = np.clip(p_pred.astype(float), eps, 1.0 - eps)
 
-    n = int(len(y_true))
-    if n == 0:
-        raise ValueError("Empty y_true")
+    # per-example unweighted logloss
+    loss = -(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
 
-    k = int(k)
-    if k <= 0:
-        raise ValueError(f"k must be >= 1, got {k}")
-    k = min(k, n)
+    # per-example weights
+    w = np.where(y > 0.5, float(w_pos), float(w_neg)).astype(float)
 
-    order = np.argsort(scores)[::-1]
-    top_idx = order[:k]
+    return float((w * loss).sum()), float(w.sum())
 
-    hits = int(y_true[top_idx].sum())
-    pos = int(y_true.sum())
 
-    expected_hits_random = float(k) * (float(pos) / float(n)) if n > 0 else 0.0
-    precision_at_k = float(hits) / float(k) if k > 0 else 0.0
-    recall_at_k = float(hits) / float(pos) if pos > 0 else 0.0
+def class_balance_weights(n: int, pos: int) -> tuple[float, float]:
+    """
+    Balanced weights such that total weight of positives == total weight of negatives.
 
-    baseline_precision_at_k = float(pos) / float(n) if n > 0 else 0.0
-    baseline_recall_at_k = (expected_hits_random / float(pos)) if pos > 0 else None
+    w_pos = n / (2*pos)
+    w_neg = n / (2*(n-pos))
 
-    lift_precision_at_k = (
-        (precision_at_k / baseline_precision_at_k) if baseline_precision_at_k > 0 else None
-    )
-    lift_recall_at_k = (
-        (recall_at_k / baseline_recall_at_k)
-        if baseline_recall_at_k is not None and baseline_recall_at_k > 0
-        else None
-    )
-
-    return {
-        "k": int(k),
-        "n": int(n),
-        "pos": int(pos),
-        "hits": int(hits),
-        "expected_hits_random": float(expected_hits_random),
-        "precision_at_k": float(precision_at_k),
-        "baseline_precision_at_k": float(baseline_precision_at_k),
-        "recall_at_k": float(recall_at_k),
-        "baseline_recall_at_k": baseline_recall_at_k,
-        "lift_precision_at_k": lift_precision_at_k,
-        "lift_recall_at_k": lift_recall_at_k,
-    }
+    If pos==0 or pos==n, fall back to 1.0/1.0.
+    """
+    n = int(n)
+    pos = int(pos)
+    neg = n - pos
+    if n <= 0 or pos <= 0 or neg <= 0:
+        return 1.0, 1.0
+    return n / (2.0 * pos), n / (2.0 * neg)

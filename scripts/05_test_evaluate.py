@@ -13,7 +13,14 @@ sys.path.append(str(REPO_ROOT))
 from src.config import load_config
 from src.fl_adapters import SkLogRegSGD
 from src.fl_protocol import load_params_npz
-from src.metrics import ap, safe_roc_auc, best_f1_threshold, precision_recall_f1_at_threshold
+from src.metrics import (
+    ap,
+    safe_roc_auc,
+    best_f1_threshold,
+    precision_recall_f1_at_threshold,
+    class_balance_weights,
+    weighted_logloss_sums,
+)
 from src.utils import load_dataset, plan_hash
 
 cfg = load_config()
@@ -71,7 +78,10 @@ def find_best_fl_model(server_out: Path, alpha: float | None = None) -> dict:
 
         metric_name = None
         metric_value = None
-        if d.get("avg_val_logloss", None) is not None:
+        if d.get("avg_val_wlogloss", None) is not None:
+            metric_name = "avg_val_wlogloss"
+            metric_value = float(d["avg_val_wlogloss"])
+        elif d.get("avg_val_logloss", None) is not None:
             metric_name = "avg_val_logloss"
             metric_value = float(d["avg_val_logloss"])
         elif d.get("avg_val_ap", None) is not None:
@@ -101,8 +111,11 @@ def find_best_fl_model(server_out: Path, alpha: float | None = None) -> dict:
             raise RuntimeError(f"No usable FL meta found under {server_out}.")
         raise RuntimeError(f"No usable FL meta found for alpha={alpha:g} under {server_out}.")
 
-    has_logloss = any(c["selection_metric"] == "avg_val_logloss" for c in candidates)
-    if has_logloss:
+    if any(c["selection_metric"] == "avg_val_wlogloss" for c in candidates):
+        cand = [c for c in candidates if c["selection_metric"] == "avg_val_wlogloss"]
+        return min(cand, key=lambda x: x["selection_value"])
+
+    if any(c["selection_metric"] == "avg_val_logloss" for c in candidates):
         cand = [c for c in candidates if c["selection_metric"] == "avg_val_logloss"]
         return min(cand, key=lambda x: x["selection_value"])
 
@@ -129,6 +142,9 @@ def eval_params_on_test(
     test_ap = float(ap(y_test, test_scores)) if y_test.sum() > 0 else 0.0
     test_auc = safe_roc_auc(y_test, test_scores)
     p_test, r_test, f1_test = precision_recall_f1_at_threshold(y_test, test_scores, thr)
+    w_pos_test, w_neg_test = class_balance_weights(int(len(y_test)), int(y_test.sum()))
+    sum_wloss, sum_w = weighted_logloss_sums(y_true=y_test, p_pred=test_scores, w_pos=w_pos_test, w_neg=w_neg_test)
+    test_wlogloss = float(sum_wloss / sum_w) if sum_w > 0 else None
 
     return {
         "val_threshold": float(thr),
@@ -140,6 +156,7 @@ def eval_params_on_test(
         "test_p": float(p_test),
         "test_r": float(r_test),
         "test_f1": float(f1_test),
+        "test_wlogloss": test_wlogloss,
     }
 
 
@@ -232,11 +249,13 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
                         f"vs current test (n={test_n} pos={test_pos}); deltas are not apples-to-apples."
                     )
             print(
-                f"Baseline(03): AP={fmt(baseline_report.get('test_ap'))} "
+                f"Baseline(03): wlogloss={fmt(baseline_report.get('test_wlogloss', baseline_report.get('test_logloss')))} "
+                f"AP={fmt(baseline_report.get('test_ap'))} "
                 f"AUC={fmt(baseline_report.get('test_roc_auc'))}"
             )
         print(
-            f"FL(03):       AP={fmt(fl_metrics['test_ap'])} AUC={fmt(fl_metrics['test_roc_auc'])} "
+            f"FL(03):       wlogloss={fmt(fl_metrics['test_wlogloss'])} "
+            f"AP={fmt(fl_metrics['test_ap'])} AUC={fmt(fl_metrics['test_roc_auc'])} "
             f"F1={fmt(fl_metrics['test_f1'], nd=4)} (thr={fl_metrics['val_threshold']:.6f} from val)"
         )
 
@@ -254,7 +273,13 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
                 )
             except Exception:
                 delta_auc = None
-            print(f"Delta(FL - Baseline): AP={fmt(delta_ap)} AUC={fmt(delta_auc)}")
+            try:
+                delta_wll = float(fl_metrics["test_wlogloss"]) - float(
+                    baseline_report.get("test_wlogloss", baseline_report.get("test_logloss", 0.0))
+                )
+            except Exception:
+                delta_wll = None
+            print(f"Delta(FL - Baseline): wlogloss={fmt(delta_wll)} AP={fmt(delta_ap)} AUC={fmt(delta_auc)}")
 
         bank_out = out_root / bank
         bank_out.mkdir(parents=True, exist_ok=True)
@@ -283,8 +308,10 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
                     "selected_alpha": baseline_report.get("selected_alpha"),
                     "selected_round": baseline_report.get("selected_round"),
                     "val_ap_best": baseline_report.get("val_ap_best"),
+                    "val_wlogloss_best": baseline_report.get("val_wlogloss_best"),
                     "test_ap": baseline_report.get("test_ap"),
                     "test_roc_auc": baseline_report.get("test_roc_auc"),
+                    "test_wlogloss": baseline_report.get("test_wlogloss", baseline_report.get("test_logloss")),
                 }
             ),
             "fl": fl_out,
@@ -300,12 +327,7 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
                 "test_p": fl_metrics["test_p"],
                 "test_r": fl_metrics["test_r"],
                 "val_thr": fl_metrics["val_threshold"],
-                "pos": int(test_pos),
-                "n": int(test_n),
-                "selected_alpha": fl_info["alpha"] if fl_info["alpha"] is not None else np.nan,
-                "selected_round": fl_info["round_id"] if fl_info["round_id"] is not None else np.nan,
-                "selection_metric": fl_info["selection_metric"],
-                "selection_value": fl_info["selection_value"] if fl_info["selection_value"] is not None else np.nan,
+                "test_wlogloss": fl_metrics["test_wlogloss"] if fl_metrics["test_wlogloss"] is not None else np.nan,
             }
         )
 
@@ -332,22 +354,18 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
         rows_cmp.append(
             {
                 "bank": bank,
-                "baseline_n": _i(base_n),
-                "baseline_pos": _i(base_pos),
                 "baseline_test_ap": _f(base.get("test_ap")),
                 "fl_test_ap": float(fl_metrics["test_ap"]),
                 "delta_test_ap": _delta(fl_metrics["test_ap"], base.get("test_ap")),
                 "baseline_roc_auc": _f(base.get("test_roc_auc")),
                 "fl_roc_auc": _f(fl_metrics["test_roc_auc"]),
                 "delta_roc_auc": _delta(fl_metrics["test_roc_auc"], base.get("test_roc_auc")),
-                "fl_n": int(test_n),
-                "fl_pos": int(test_pos),
-                "baseline_selected_alpha": _f(base.get("selected_alpha")),
-                "baseline_selected_round": _i(base.get("selected_round")),
-                "fl_selected_alpha": float(fl_info["alpha"]) if fl_info["alpha"] is not None else np.nan,
-                "fl_selected_round": int(fl_info["round_id"]) if fl_info["round_id"] is not None else np.nan,
-                "fl_selection_metric": fl_info["selection_metric"],
-                "fl_selection_value": float(fl_info["selection_value"]) if fl_info["selection_value"] is not None else np.nan,
+                "baseline_test_wlogloss": _f(base.get("test_wlogloss", base.get("test_logloss"))),
+                "fl_test_wlogloss": _f(fl_metrics.get("test_wlogloss")),
+                "delta_test_wlogloss": _delta(
+                    fl_metrics.get("test_wlogloss"),
+                    base.get("test_wlogloss", base.get("test_logloss")),
+                ),
             }
         )
 
