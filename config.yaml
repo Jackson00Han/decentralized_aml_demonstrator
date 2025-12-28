@@ -28,11 +28,11 @@ baseline:
 fl:
   fk_key: true
   secure_agg_key: "simulated_secure_agg_key"
-  num_rounds: 10
+  num_rounds: 50
   local_epochs: 1
   patience: 3
   alpha: 1e-4
-  alpha_grid: [1e-3, 1e-4, 1e-5]
+  alpha_grid: [1e-3,]
 
 schema:
   version: "v1"
@@ -40,6 +40,6 @@ schema:
   num_cols: ['initial_deposit', 'out_cnt', 'in_cnt', 'net_flow']
   data_splits:
     train_frac: 0.7
-    val_frac: 0.2
-    test_frac: 0.1
+    val_frac: 0.15
+    test_frac: 0.15
   #num_cols: ['initial_deposit', 'out_cnt', 'out_sum', 'out_nuniq_bene', 'in_cnt', 'in_sum', 'in_nuniq_orig', 'net_flow', 'out_max_daily_cnt', 'out_max_daily_sum', 'in_max_daily_cnt', 'in_max_daily_sum']

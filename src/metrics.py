@@ -47,3 +47,56 @@ def best_f1_threshold(y_true: np.ndarray, scores: np.ndarray):
             best_thr, best_p, best_r, best_f1 = float(thr), float(p), float(r), float(f1)
 
     return best_thr, best_p, best_r, best_f1
+
+
+def topk_report(y_true: np.ndarray, scores: np.ndarray, k: int) -> dict:
+    """
+    Report top-k performance for rare-event detection use-cases.
+    """
+    y_true = np.asarray(y_true).astype(int)
+    scores = np.asarray(scores).astype(float)
+
+    n = int(len(y_true))
+    if n == 0:
+        raise ValueError("Empty y_true")
+
+    k = int(k)
+    if k <= 0:
+        raise ValueError(f"k must be >= 1, got {k}")
+    k = min(k, n)
+
+    order = np.argsort(scores)[::-1]
+    top_idx = order[:k]
+
+    hits = int(y_true[top_idx].sum())
+    pos = int(y_true.sum())
+
+    expected_hits_random = float(k) * (float(pos) / float(n)) if n > 0 else 0.0
+    precision_at_k = float(hits) / float(k) if k > 0 else 0.0
+    recall_at_k = float(hits) / float(pos) if pos > 0 else 0.0
+
+    baseline_precision_at_k = float(pos) / float(n) if n > 0 else 0.0
+    baseline_recall_at_k = (expected_hits_random / float(pos)) if pos > 0 else None
+
+    lift_precision_at_k = (
+        (precision_at_k / baseline_precision_at_k) if baseline_precision_at_k > 0 else None
+    )
+    lift_recall_at_k = (
+        (recall_at_k / baseline_recall_at_k)
+        if baseline_recall_at_k is not None and baseline_recall_at_k > 0
+        else None
+    )
+
+    return {
+        "k": int(k),
+        "n": int(n),
+        "pos": int(pos),
+        "hits": int(hits),
+        "expected_hits_random": float(expected_hits_random),
+        "precision_at_k": float(precision_at_k),
+        "baseline_precision_at_k": float(baseline_precision_at_k),
+        "recall_at_k": float(recall_at_k),
+        "baseline_recall_at_k": baseline_recall_at_k,
+        "lift_precision_at_k": lift_precision_at_k,
+        "lift_recall_at_k": lift_recall_at_k,
+    }
