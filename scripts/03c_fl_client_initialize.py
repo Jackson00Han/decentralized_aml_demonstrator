@@ -1,4 +1,4 @@
-# 04c_client_initialization.py
+# 03c_client_initialization.py
 from __future__ import annotations
 
 import hashlib
@@ -28,13 +28,14 @@ def main(bank: str, out_dir: str | None = None, overwrite: bool = False) -> None
     server_out = cfg.paths.out_fl_server
     plan_path = server_out / "global_plan.json"
     if not plan_path.exists():
-        raise FileNotFoundError(f"Missing global plan: {plan_path} (run 04b_server_build_global_plan.py)")
+        raise FileNotFoundError(f"Missing global plan: {plan_path} (run 03b_server_build_global_plan.py)")
 
     plan = GlobalPlan.load(plan_path)
     preprocess = build_preprocessor(plan)
     train_frac = cfg.schema.train_frac
     val_frac = cfg.schema.val_frac
     test_frac = cfg.schema.test_frac
+    print(f"train/val/test = {train_frac}/{val_frac}/{test_frac}")
 
     data_processed = cfg.paths.data_processed
     df = pd.read_parquet(data_processed / bank / "processed.parquet")

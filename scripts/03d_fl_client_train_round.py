@@ -1,4 +1,4 @@
-# 04d_fl_client_train_round.py
+# 03d_fl_client_train_round.py
 from __future__ import annotations
 
 import sys
@@ -18,12 +18,12 @@ from src.utils import load_dataset, plan_hash
 def find_dataset_dir(bank: str, client_out: Path, expected_plan_hash: str) -> Path:
     base = client_out / bank / "datasets"
     if not base.exists():
-        raise FileNotFoundError(f"Missing datasets dir: {base} (run scripts/04c_fl_client_initialize.py)")
+        raise FileNotFoundError(f"Missing datasets dir: {base} (run scripts/03c_fl_client_initialize.py)")
 
     prefix = f"plan_{expected_plan_hash[:8]}"
     candidates = [p for p in base.iterdir() if p.is_dir() and p.name.startswith(prefix)]
     if not candidates:
-        raise FileNotFoundError(f"No dataset matching {prefix} under {base} (run scripts/04c_fl_client_initialize.py)")
+        raise FileNotFoundError(f"No dataset matching {prefix} under {base} (run scripts/03c_fl_client_initialize.py)")
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
@@ -40,7 +40,7 @@ def main(
 
     plan_path = server_out / "global_plan.json"
     if not plan_path.exists():
-        raise FileNotFoundError(f"Missing global plan: {plan_path} (run scripts/04b_fl_server_build_global_plan.py)")
+        raise FileNotFoundError(f"Missing global plan: {plan_path} (run scripts/03b_server_build_global_plan.py)")
     expected_hash = plan_hash(plan_path)
     plan = GlobalPlan.load(plan_path)
 
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--client", default="bank_l")
     parser.add_argument("--round_id", type=int, default=1)
-    parser.add_argument("--data_dir", default=None, help="dataset dir from scripts/04c_fl_client_initialize.py")
+    parser.add_argument("--data_dir", default=None, help="dataset dir from scripts/03c_fl_client_initialize.py")
     parser.add_argument("--alpha", type=float, default=None, help="override cfg.fl.alpha for this run")
     parser.add_argument("--use_trainval", action="store_true", help="train on train+val (skip validation)")
     args = parser.parse_args()

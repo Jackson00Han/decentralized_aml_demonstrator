@@ -105,6 +105,7 @@ def train_select_best(
 
 
 def main(client: str | None = None, save_model: bool = True) -> None:
+    import shutil
     cfg = load_config()
     server_out = cfg.paths.out_fl_server
     client_out = cfg.paths.out_fl_clients
@@ -122,7 +123,9 @@ def main(client: str | None = None, save_model: bool = True) -> None:
     seed = int(cfg.project.seed)
 
     out_root = cfg.paths.out_local_baseline
-    out_root.mkdir(parents=True, exist_ok=True)
+    if out_root.exists():
+        shutil.rmtree(out_root)
+    out_root.mkdir(parents=True, exist_ok=False)
 
     banks = [client] if client is not None else list(cfg.banks.names)
     summary_rows: list[dict] = []

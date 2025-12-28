@@ -5,13 +5,16 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(REPO_ROOT))
+
 from src.config import load_config
 from src.fl_protocol import load_params_npz, save_params_npz
 
 cfg = load_config()
 PY = [sys.executable]
+
 
 def run(cmd, *, quiet: bool = True):
     disp = []
@@ -30,6 +33,7 @@ def run(cmd, *, quiet: bool = True):
             proc.check_returncode()
         return
     subprocess.run(list(map(str, cmd)), check=True)
+
 
 def aggregate_round_val_logloss_secure(client_out: Path, round_id: int, alpha: float, banks: list[str]) -> float:
     """
@@ -79,10 +83,20 @@ def aggregate_round_val_logloss_secure(client_out: Path, round_id: int, alpha: f
     return total_num / total_den
 
 
-
 def main():
+    import shutil
+
     server_out = cfg.paths.out_fl_server
+    if server_out.exists():
+        shutil.rmtree(server_out)
+    server_out.mkdir(parents=True, exist_ok=False)
+
     client_out = cfg.paths.out_fl_clients
+    if client_out.exists():
+        shutil.rmtree(client_out)
+    client_out.mkdir(parents=True, exist_ok=False)
+
+    best_global_path = server_out / "global_model_best.npz"
 
     # 1) client train-only stats
     for bank in cfg.banks.names:
@@ -101,13 +115,14 @@ def main():
                 bank,
                 "--overwrite",
             ],
-            quiet=True
+            quiet=True,
         )
 
     alpha_grid = cfg.fl.alpha_grid
     patience = cfg.fl.patience
     num_rounds = cfg.fl.num_rounds
 
+    # Track best across ALL alphas/rounds
     best_overall = {"alpha": None, "round_id": 0, "val_wlogloss": float("inf"), "model_path": ""}
 
     for alpha in alpha_grid:
@@ -116,7 +131,7 @@ def main():
         best_val_wlogloss = float("inf")
         best_round = 0
 
-        # reset global model pointer
+        # reset global model pointer for this alpha run
         delete_path = server_out / "global_model_latest.npz"
         if delete_path.exists():
             delete_path.unlink()
@@ -126,17 +141,19 @@ def main():
         metrics_path = metrics_dir / f"val_wlogloss_alpha{float(alpha):.6f}.jsonl"
         metrics_path.write_text("", encoding="utf-8")
 
-        best_alpha_model = {"alpha": alpha, "round_id": 0, "val_wlogloss": float("inf"), "model_path": ""}
         for round_id in range(1, num_rounds + 1):
             # 4) clients train one round and write updates
             for bank in cfg.banks.names:
                 run(
-                    PY +
-                    [
+                    PY
+                    + [
                         str(REPO_ROOT / "scripts" / "03d_fl_client_train_round.py"),
-                        "--client", bank,
-                        "--round_id", round_id,
-                        "--alpha", alpha,
+                        "--client",
+                        bank,
+                        "--round_id",
+                        round_id,
+                        "--alpha",
+                        alpha,
                     ],
                     quiet=True,
                 )
@@ -177,48 +194,51 @@ def main():
                     + "\n"
                 )
 
-            # 8) early stopping
-            is_new_best = avg_val_wlogloss < best_val_wlogloss
-            if is_new_best:
+            # 8) early stopping (within this alpha)
+            is_new_best_alpha = avg_val_wlogloss < best_val_wlogloss
+            if is_new_best_alpha:
                 best_val_wlogloss = avg_val_wlogloss
                 best_round = round_id
                 no_improve = 0
+            else:
+                no_improve += 1
 
-                # save best model for this alpha
+            # 9) overwrite ONLY ONE best global model file (across all alphas/rounds)
+            is_new_best_overall = avg_val_wlogloss < best_overall["val_wlogloss"]
+            if is_new_best_overall:
                 global_model_path = server_out / "global_model_latest.npz"
                 params = load_params_npz(global_model_path)
 
-                best_model_path = server_out / f"global_model_best_alpha{alpha:.6f}.npz"
                 save_params_npz(
-                    best_model_path,
+                    best_global_path,
                     params,
                     meta={
                         "alpha": float(alpha),
                         "round_id": int(round_id),
-                        "avg_val_wlogloss": float(best_val_wlogloss),
-                        "avg_val_logloss": float(best_val_wlogloss),  # backward compatibility
+                        "avg_val_wlogloss": float(avg_val_wlogloss),
+                        "avg_val_logloss": float(avg_val_wlogloss),  # backward compatibility
                     },
                 )
-                best_alpha_model.update(
-                    {
-                        "alpha": alpha,
-                        "round_id": round_id,
-                        "val_wlogloss": best_val_wlogloss,
-                        "model_path": best_model_path,
-                    }
-                )
-            else:
-                no_improve += 1
+                best_overall = {
+                    "alpha": float(alpha),
+                    "round_id": int(round_id),
+                    "val_wlogloss": float(avg_val_wlogloss),
+                    "model_path": str(best_global_path),
+                }
 
-            tag = " new_best" if is_new_best else ""
+
+            tag_overall = " new_best" if is_new_best_overall else ""
             print(
-                f"alpha={alpha:.0e} round={round_id:02d}/{num_rounds} "
-                f"avg_val_wlogloss={avg_val_wlogloss:.6f} best={best_val_wlogloss:.6f} no_improve={no_improve}{tag}"
+                f"alpha={alpha:.0e} round={round_id:02d}/{num_rounds}: "
+                f"avg_val_wlogloss={avg_val_wlogloss:.6f} "
+                f"best_alpha={best_val_wlogloss:.6f} no_improve={no_improve}"
+                f"{tag_overall}"
             )
 
             if no_improve >= patience:
                 print(
-                    f"[alpha={alpha:.0e}] early_stop round={round_id:02d} best_val_wlogloss={best_val_wlogloss:.6f}"
+                    f"[alpha={alpha:.0e}] Early stopping at round {round_id:02d} "
+                    f"with best_val_wlogloss={best_val_wlogloss:.6f} at round {best_round:02d}"
                 )
                 break
 
@@ -226,8 +246,9 @@ def main():
             f"[alpha={alpha:.0e}] best_round={best_round:02d} best_val_wlogloss={best_val_wlogloss:.6f} "
             f"rounds_run={round_id:02d} early_stop={no_improve>=patience}"
         )
-        if best_alpha_model["val_wlogloss"] < best_overall["val_wlogloss"]:
-            best_overall = best_alpha_model
+
+    if best_overall["alpha"] is None:
+        raise RuntimeError("No best model was selected; check that evaluation produced valid metrics.")
 
     print(
         f"Best overall model: alpha={best_overall['alpha']:.6f}, "

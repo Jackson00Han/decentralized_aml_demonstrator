@@ -39,6 +39,7 @@ class Paths:
     out_local_baseline: Path
     out_fl_clients: Path
     out_fl_server: Path
+    baseline: Path
 
 @dataclass(frozen=True)
 class Banks:
@@ -123,6 +124,7 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
     data_raw = _p(repo_root, paths.get("data_raw", "data/raw"))
     data_processed = _p(repo_root, paths.get("data_processed", "data/processed"))
     outputs_root = _p(repo_root, paths.get("outputs_root", "outputs"))
+    baseline = _p(repo_root, paths.get("baseline", "outputs/local_baseline"))
 
     # Preprocess
     preprocess = raw.get("preprocess", {})
@@ -168,9 +170,9 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
     cat_cols = list(schema.get("cat_cols", []))
     num_cols = list(schema.get("num_cols", []))
     data_splits = raw.get("data_splits", {})
-    train_frac = float(data_splits.get("train_frac", 0.7))
-    val_frac = float(data_splits.get("val_frac", 0.2))
-    test_frac = float(data_splits.get("test_frac", 0.1))
+    train_frac = data_splits.get("train_frac", 0.7)
+    val_frac = data_splits.get("val_frac", 0.15)
+    test_frac = data_splits.get("test_frac", 0.15)
     
 
     return Config(
@@ -184,6 +186,7 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
             out_local_baseline=baseline_out,
             out_fl_clients=out_fl_clients,
             out_fl_server=out_fl_server,
+            baseline=baseline,
         ),
         preprocess=PreprocessCfg(keep_cols=keep_cols),
         baseline=BaselineCfg(

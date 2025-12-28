@@ -62,66 +62,6 @@ def load_baseline_report(baseline_out: Path, bank: str) -> tuple[dict | None, Pa
     return None, None
 
 
-def find_best_fl_model(server_out: Path, alpha: float | None = None) -> dict:
-    meta_files = sorted(server_out.glob("global_model_best_alpha*.meta.json"))
-    if not meta_files:
-        raise RuntimeError(f"No best-alpha meta files under {server_out}. Run scripts/03_fl_train.py first.")
-
-    candidates: list[dict] = []
-    for mf in meta_files:
-        d = load_json(mf)
-        if "alpha" not in d or "round_id" not in d:
-            continue
-        a = float(d["alpha"])
-        if alpha is not None and abs(a - float(alpha)) > 1e-12:
-            continue
-
-        metric_name = None
-        metric_value = None
-        if d.get("avg_val_wlogloss", None) is not None:
-            metric_name = "avg_val_wlogloss"
-            metric_value = float(d["avg_val_wlogloss"])
-        elif d.get("avg_val_logloss", None) is not None:
-            metric_name = "avg_val_logloss"
-            metric_value = float(d["avg_val_logloss"])
-        elif d.get("avg_val_ap", None) is not None:
-            metric_name = "avg_val_ap"
-            metric_value = float(d["avg_val_ap"])
-        else:
-            continue
-
-        model_path = mf.with_suffix("").with_suffix(".npz")
-        if not model_path.exists():
-            raise FileNotFoundError(f"Missing model file for meta: {model_path}")
-
-        candidates.append(
-            {
-                "alpha": a,
-                "round_id": int(d["round_id"]),
-                "selection_metric": metric_name,
-                "selection_value": metric_value,
-                "model_path": model_path,
-                "meta_path": mf,
-                "meta": d,
-            }
-        )
-
-    if not candidates:
-        if alpha is None:
-            raise RuntimeError(f"No usable FL meta found under {server_out}.")
-        raise RuntimeError(f"No usable FL meta found for alpha={alpha:g} under {server_out}.")
-
-    if any(c["selection_metric"] == "avg_val_wlogloss" for c in candidates):
-        cand = [c for c in candidates if c["selection_metric"] == "avg_val_wlogloss"]
-        return min(cand, key=lambda x: x["selection_value"])
-
-    if any(c["selection_metric"] == "avg_val_logloss" for c in candidates):
-        cand = [c for c in candidates if c["selection_metric"] == "avg_val_logloss"]
-        return min(cand, key=lambda x: x["selection_value"])
-
-    return max(candidates, key=lambda x: x["selection_value"])
-
-
 def eval_params_on_test(
     *,
     params: dict,
@@ -160,28 +100,16 @@ def eval_params_on_test(
     }
 
 
-def main(alpha: float | None = None, model_path: str | None = None, baseline_dir: str | None = None) -> None:
+def main() -> None:
     server_out = cfg.paths.out_fl_server
     client_out = cfg.paths.out_fl_clients
-    baseline_out = Path(baseline_dir) if baseline_dir is not None else cfg.paths.out_local_baseline
+    baseline_out = cfg.paths.out_local_baseline
 
-    if model_path is not None:
-        fl_model_path = Path(model_path)
-        if not fl_model_path.exists():
-            raise FileNotFoundError(f"Missing --model_path: {fl_model_path}")
-        fl_info = {
-            "alpha": float(alpha) if alpha is not None else None,
-            "round_id": None,
-            "selection_metric": "manual_model_path",
-            "selection_value": None,
-            "model_path": fl_model_path,
-            "meta_path": None,
-            "meta": None,
-        }
-    else:
-        fl_info = find_best_fl_model(server_out, alpha=alpha)
-        fl_model_path = fl_info["model_path"]
-
+    fl_model_path = server_out / "global_model_best.npz"
+    if not fl_model_path.exists():
+        raise FileNotFoundError(
+            f"Missing best model: {fl_model_path} (save best model as global_model_best.npz first)"
+        )
     fl_params = load_params_npz(fl_model_path)
     seed = int(cfg.project.seed)
 
@@ -190,14 +118,7 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
         raise FileNotFoundError(f"Missing global plan: {plan_path} (run scripts/03b_fl_server_build_global_plan.py)")
     expected_hash = plan_hash(plan_path)
 
-    sel_metric = fl_info["selection_metric"]
-    sel_value = fl_info["selection_value"]
-    if fl_info["alpha"] is None:
-        print(f"Using FL model: {fl_model_path}")
-    else:
-        extra = "" if sel_value is None else f" | {sel_metric}={sel_value:.6f}"
-        rid = "NA" if fl_info["round_id"] is None else f"{int(fl_info['round_id']):03d}"
-        print(f"Using FL model: alpha={fl_info['alpha']:g} round={rid}{extra} | {fl_model_path}")
+    print(f"Using FL model: {fl_model_path}")
 
     out_root = server_out / "test_eval"
     out_root.mkdir(parents=True, exist_ok=True)
@@ -215,7 +136,7 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
         test_n = int(len(y_test))
         test_pos = int(y_test.sum())
 
-        fl_alpha = float(fl_info["alpha"]) if fl_info["alpha"] is not None else float(cfg.fl.alpha)
+        fl_alpha = float(cfg.fl.alpha)
         fl_metrics = eval_params_on_test(
             params=fl_params,
             X_val=X_val,
@@ -231,8 +152,9 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
         print("\n" + "=" * 68)
         print(f"Test evaluation | {bank}")
         print("=" * 68)
+        print(f"Test split: n={test_n} pos={test_pos}")
         if baseline_report is None:
-            print("Baseline(03): NA (missing baseline report)")
+            print("Base:        NA (missing baseline report)")
         else:
             base_n = baseline_report.get("test_n", None)
             base_pos = baseline_report.get("test_pos", None)
@@ -245,21 +167,29 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
                 base_pos = int(base_pos)
                 if base_n != test_n or base_pos != test_pos:
                     print(
-                        f"WARNING: baseline report split differs (baseline n={base_n} pos={base_pos}) "
-                        f"vs current test (n={test_n} pos={test_pos}); deltas are not apples-to-apples."
+                        f"WARNING: baseline split differs (baseline n={base_n} pos={base_pos}) "
+                        f"vs current test (n={test_n} pos={test_pos}); deltas may be misleading."
                     )
+            base_wll = baseline_report.get("test_wlogloss", baseline_report.get("test_logloss"))
             print(
-                f"Baseline(03): wlogloss={fmt(baseline_report.get('test_wlogloss', baseline_report.get('test_logloss')))} "
-                f"AP={fmt(baseline_report.get('test_ap'))} "
-                f"AUC={fmt(baseline_report.get('test_roc_auc'))}"
+                f"Base:        wlogloss={fmt(base_wll)} AP={fmt(baseline_report.get('test_ap'))} "
+                f"AUC={fmt(baseline_report.get('test_roc_auc'))} "
+                f"F1={fmt(baseline_report.get('test_f1'), nd=4)}"
             )
         print(
             f"FL(03):       wlogloss={fmt(fl_metrics['test_wlogloss'])} "
             f"AP={fmt(fl_metrics['test_ap'])} AUC={fmt(fl_metrics['test_roc_auc'])} "
             f"F1={fmt(fl_metrics['test_f1'], nd=4)} (thr={fl_metrics['val_threshold']:.6f} from val)"
         )
-
         if baseline_report is not None:
+            try:
+                delta_p = float(fl_metrics["test_p"]) - float(baseline_report.get("test_p", 0.0))
+            except Exception:
+                delta_p = None
+            try:
+                delta_r = float(fl_metrics["test_r"]) - float(baseline_report.get("test_r", 0.0))
+            except Exception:
+                delta_r = None
             try:
                 delta_ap = float(fl_metrics["test_ap"]) - float(baseline_report.get("test_ap", 0.0))
             except Exception:
@@ -279,17 +209,21 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
                 )
             except Exception:
                 delta_wll = None
-            print(f"Delta(FL - Baseline): wlogloss={fmt(delta_wll)} AP={fmt(delta_ap)} AUC={fmt(delta_auc)}")
+            try:
+                delta_f1 = float(fl_metrics["test_f1"]) - float(baseline_report.get("test_f1", 0.0))
+            except Exception:
+                delta_f1 = None
+            print(
+                f"Delta(FL - Base): P={fmt(delta_p)} R={fmt(delta_r)} "
+                f"AP={fmt(delta_ap)} AUC={fmt(delta_auc)} wlogloss={fmt(delta_wll)} "
+                f"F1={fmt(delta_f1, nd=4)}"
+            )
 
         bank_out = out_root / bank
         bank_out.mkdir(parents=True, exist_ok=True)
 
         fl_out = {
             "bank": bank,
-            "selected_alpha": fl_info["alpha"],
-            "selected_round": fl_info["round_id"],
-            "selection_metric": fl_info["selection_metric"],
-            "selection_value": fl_info["selection_value"],
             "model_path": str(fl_model_path),
             "test_n": int(test_n),
             "test_pos": int(test_pos),
@@ -299,8 +233,8 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
 
         cmp_out = {
             "bank": bank,
-            "baseline_path": str(baseline_path) if baseline_path is not None else None,
-            "baseline": (
+            "base_path": str(baseline_path) if baseline_path is not None else None,
+            "base": (
                 None
                 if baseline_report is None
                 else {
@@ -309,9 +243,12 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
                     "selected_round": baseline_report.get("selected_round"),
                     "val_ap_best": baseline_report.get("val_ap_best"),
                     "val_wlogloss_best": baseline_report.get("val_wlogloss_best"),
-                    "test_ap": baseline_report.get("test_ap"),
-                    "test_roc_auc": baseline_report.get("test_roc_auc"),
-                    "test_wlogloss": baseline_report.get("test_wlogloss", baseline_report.get("test_logloss")),
+                    "ap": baseline_report.get("test_ap"),
+                    "roc_auc": baseline_report.get("test_roc_auc"),
+                    "wlogloss": baseline_report.get("test_wlogloss", baseline_report.get("test_logloss")),
+                    "p": baseline_report.get("test_p"),
+                    "r": baseline_report.get("test_r"),
+                    "f1": baseline_report.get("test_f1"),
                 }
             ),
             "fl": fl_out,
@@ -331,20 +268,10 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
             }
         )
 
-        # Comparison row (baseline + FL + delta)
         base = baseline_report or {}
-        base_n = base.get("test_n", None)
-        base_pos = base.get("test_pos", None)
-        if base_n is None or base_pos is None:
-            base_topk = base.get("topk", {}) if isinstance(base.get("topk", {}), dict) else {}
-            base_n = base_topk.get("n", None)
-            base_pos = base_topk.get("pos", None)
 
         def _f(x):
             return float(x) if x is not None else np.nan
-
-        def _i(x):
-            return int(x) if x is not None else np.nan
 
         def _delta(a, b):
             if a is None or b is None:
@@ -354,18 +281,27 @@ def main(alpha: float | None = None, model_path: str | None = None, baseline_dir
         rows_cmp.append(
             {
                 "bank": bank,
-                "baseline_test_ap": _f(base.get("test_ap")),
-                "fl_test_ap": float(fl_metrics["test_ap"]),
-                "delta_test_ap": _delta(fl_metrics["test_ap"], base.get("test_ap")),
-                "baseline_roc_auc": _f(base.get("test_roc_auc")),
-                "fl_roc_auc": _f(fl_metrics["test_roc_auc"]),
-                "delta_roc_auc": _delta(fl_metrics["test_roc_auc"], base.get("test_roc_auc")),
-                "baseline_test_wlogloss": _f(base.get("test_wlogloss", base.get("test_logloss"))),
-                "fl_test_wlogloss": _f(fl_metrics.get("test_wlogloss")),
-                "delta_test_wlogloss": _delta(
+                "base_p": _f(base.get("test_p")),
+                "fl_p": _f(fl_metrics.get("test_p")),
+                "delta_p": _delta(fl_metrics.get("test_p"), base.get("test_p")),
+                "base_r": _f(base.get("test_r")),
+                "fl_r": _f(fl_metrics.get("test_r")),
+                "delta_r": _delta(fl_metrics.get("test_r"), base.get("test_r")),
+                "base_ap": _f(base.get("test_ap")),
+                "fl_ap": float(fl_metrics["test_ap"]),
+                "delta_ap": _delta(fl_metrics["test_ap"], base.get("test_ap")),
+                "base_auc": _f(base.get("test_roc_auc")),
+                "fl_auc": _f(fl_metrics["test_roc_auc"]),
+                "delta_auc": _delta(fl_metrics["test_roc_auc"], base.get("test_roc_auc")),
+                "base_wlogloss": _f(base.get("test_wlogloss", base.get("test_logloss"))),
+                "fl_wlogloss": _f(fl_metrics.get("test_wlogloss")),
+                "delta_wlogloss": _delta(
                     fl_metrics.get("test_wlogloss"),
                     base.get("test_wlogloss", base.get("test_logloss")),
                 ),
+                "base_f1": _f(base.get("test_f1")),
+                "fl_f1": _f(fl_metrics.get("test_f1")),
+                "delta_f1": _delta(fl_metrics.get("test_f1"), base.get("test_f1")),
             }
         )
 
@@ -394,9 +330,6 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--alpha", type=float, default=0.001, help="evaluate best model for this alpha (default: best overall)")
-    parser.add_argument("--model_path", default=None, help="override FL model path (.npz)")
-    parser.add_argument("--baseline_dir", default=None, help="baseline output dir (default: cfg.paths.out_local_baseline)")
     args = parser.parse_args()
 
-    main(alpha=args.alpha, model_path=args.model_path, baseline_dir=args.baseline_dir)
+    main()

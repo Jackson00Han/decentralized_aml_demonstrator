@@ -11,6 +11,7 @@ paths:
   outputs_root: "outputs"
   out_fl_clients: "outputs/fl_clients"
   out_fl_server: "outputs/fl_server"
+  baseline: "outputs/local_baseline"
 
 preprocess:
   keep_cols:
@@ -19,25 +20,24 @@ preprocess:
     - state
 
 baseline:
-  top_k: 100
-  alpha_grid: [1e-3, 1e-4, 1e-5]
-  max_rounds: 10
+  alpha_grid: [1e-5,]
+  max_rounds: 30
   patience: 3
   out_dir: "outputs/local_baseline"
 
 fl:
   fk_key: true
   secure_agg_key: "simulated_secure_agg_key"
-  num_rounds: 50
+  num_rounds: 30
   local_epochs: 1
   patience: 3
   alpha: 1e-4
-  alpha_grid: [1e-3,]
+  alpha_grid: [1e-5,]
 
 schema:
   version: "v1"
   cat_cols: ['state']
-  num_cols: ['initial_deposit', 'out_cnt', 'in_cnt', 'net_flow']
+  num_cols: ['initial_deposit', 'out_sum', 'in_sum', 'net_flow', 'in_max_daily_sum', 'out_max_daily_sum']
   data_splits:
     train_frac: 0.7
     val_frac: 0.15
