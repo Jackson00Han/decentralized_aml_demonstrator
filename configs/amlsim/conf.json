@@ -1,7 +1,7 @@
 {
   "general": {
     "random_seed": 0,
-    "simulation_name": "three_banks_124516",
+    "simulation_name": "three_banks_10K",
     "total_steps": 720,
     "base_date": "2017-01-01"
   },
@@ -36,7 +36,7 @@
     }
   },
   "input": {
-    "directory": "paramFiles/three_banks_100K",
+    "directory": "paramFiles/three_banks_10K",
     "schema": "schema.json",
     "accounts": "accounts.csv",
     "alert_patterns": "alertPatterns.csv",
@@ -77,6 +77,8 @@
     "compute_diameter": false,
     "transaction_limit": 0,
     "transaction_interval": 7,
+    "sar_interval": 7,
+    "sar_balance_ratio": 1.0,
     "numBranches": 1000
   },
   "visualizer": {
@@ -88,4 +90,3 @@
     "diameter": "diameter.png"
   }
 }
-

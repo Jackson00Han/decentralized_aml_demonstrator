@@ -5,9 +5,9 @@
 ## 1） Quickstart (modeling only)
 
 Assumes data already exists under:
-- `data/raw/bank_a`
-- `data/raw/bank_b`
-- `data/raw/bank_c`
+- `data/raw/<bank>`
+
+By default, bank names come from `config.yaml` (currently: `bank_s`, `bank_m`, `bank_l`).
 ```bash
 
 cd /path/to/decentralized_aml_demonstrator/ # cd /home/admin_ml/Jackson/projects/aml/decentralized_aml_demonstrator/
@@ -26,6 +26,15 @@ python scripts/05_evaluate.py
 
 
 ### 2.1 One-time AMLSim setup
+0. Set AMLSim path
+
+    ```bash
+    export AMLSIM_DIR=$HOME/projects/AMLSim
+    ```
+   Example:
+    ```bash
+    export AMLSIM_DIR=/home/admin_ml/Jackson/projects/aml/amlsim/AMLSim 
+    ```
 
 1. System dependencies (Ubuntu):
     ```bash
@@ -106,6 +115,5 @@ AMLSim is an external dependency (cloned outside this repo).
     ```bash
     deactivate
     ```
-
 
 
