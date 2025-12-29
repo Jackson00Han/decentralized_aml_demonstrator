@@ -2,6 +2,8 @@
 
 
 
+![FL](image.png)
+
 The directory structure of the AMLSim workspace and this repository is expected to be as follows:
 
 ```text
@@ -175,5 +177,4 @@ AMLSim is an external dependency and should be cloned outside this repository.
     deactivate
     ```
 Now, you will have data under decentralized_aml_demonstrator/data/raw/
-
 
