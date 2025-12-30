@@ -2,7 +2,7 @@
 
 Decentralized AML Demonstrator is a federated learning pipeline for bank anti-money laundering on AMLSim-generated multi-bank data. Each bank trains locally on labeled account-level SAR data and shares model updates to learn a global detector of suspicious accounts without sharing raw data. The model layer is adapter-based and currently defaults to logistic regression (SGD), with room to extend to other ML/DL/GNN models.
 
-![FL](image.png
+![FL](image.png)
 
 The directory structure of the AMLSim workspace and this repository is expected to be as follows:
 
