@@ -37,6 +37,10 @@ The directory structure of the AMLSim workspace and this repository is expected 
 ```
 > **Note:** Python 3.7 is required for compatibility with AMLSim. So, we separately create a virtual environment for AMLSim and another for this project.
 
+## FL performance result quick view
+![FL performance quick view](output.png)
+
+
 ## Quickstart (Modeling Only)
 
 Assumes data already exists (if not, go to full step for the first time) under `data/raw/<bank>`. By default, bank names come from `config.yaml` (currently: `bank_s`, `bank_m`, `bank_l`).
