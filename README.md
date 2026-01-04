@@ -7,36 +7,44 @@ Decentralized AML Demonstrator is a federated learning pipeline for bank anti-mo
 The directory structure of the AMLSim workspace and this repository is expected to be as follows:
 
 ```text
-~/projects/aml/
-├── amlsim/                          ← AMLSIM workspace
-│   └── AMLSIM/                      ← AMLSim repository
-│       ├── .venv/                  ← virtual environment for AMLSIM
-│       ├── jars/
-│       ├── scripts/
-│       └── ...
+~/projects/
+├── AMLSim/                             # AMLSim repository (data simulation)
+│   ├── .venv/                          # Python 3.7 virtual environment (AMLSim only)
+│   ├── scripts/                        # AMLSim data generation scripts
+│   ├── outputs/                        # Raw simulation outputs (transactions, accounts)
+│   └── ...                             # Other AMLSim files
 │
-└── decentralized_aml_demonstrator/ ← this project
-    ├── data/                       ← processed datasets
-    └── scripts/                    ← data processing & training
-        ├── 02_process_data.py
-        ├── 03_train_local_baseline.py
-        ├── 04_federated_round.py
-        ├── 05_evaluate.py
-        └── ...
+└── decentralized_aml_demonstrator/     # This project (federated learning pipeline)
+    ├── .venv/                          # Python virtual environment for this project
+    ├── configs/                        # AMLSim configuration files for data generation
+    ├── data/                           # Processed and raw datasets
+    ├── outputs/                        # Model outputs, logs, and evaluation results
+    ├── scripts/                        # End-to-end data processing & training pipeline
+    │   ├── 01_generate_data.py         # Invoke AMLSim to generate multi-bank data
+    │   ├── 02_process_data.py          # Aggregate transactions into account-level features
+    │   ├── 03_fl_train.py              # Train federated learning models
+    │   ├── 03a_fl_client_report_stats.py
+    │   ├── 03...
+    │   ├── 03f_fl_evaluation.py
+    │   ├── 04_train_local_baseline.py  # Train local (non-FL) baseline models
+    │   └── 05_test_evaluate.py         # Final evaluation and comparison
+    ├── src/                            # Core Python modules (feature engineering, FL logic)
+    ├── tests/                          # Unit and integration tests
+    ├── requirements.txt                # Python dependencies
+    ├── config.yaml                     # Main experiment configuration
+    └── README.md
+
 ```
 > **Note:** Python 3.7 is required for compatibility with AMLSim. So, we separately create a virtual environment for AMLSim and another for this project.
 
 ## Quickstart (Modeling Only)
 
-Assumes data already exists (if not, go to full step for the first time) under:
-- `data/raw/<bank>`
-
-By default, bank names come from `config.yaml` (currently: `bank_s`, `bank_m`, `bank_l`).
+Assumes data already exists (if not, go to full step for the first time) under `data/raw/<bank>`. By default, bank names come from `config.yaml` (currently: `bank_s`, `bank_m`, `bank_l`).
 
 Process data, run federated training, local baseline training, and evaluation:
 ```bash
 
-cd /path/to/decentralized_aml_demonstrator/ # cd /home/admin_ml/Jackson/projects/aml/decentralized_aml_demonstrator/
+cd /path/to/decentralized_aml_demonstrator/ # cd /home/azureuser/projects/decentralized_aml_demonstrator/
 
 deactivate # optional, deactivate AMLSim venv if active
 
@@ -59,11 +67,11 @@ python scripts/03g_fl_round1_val_eval.py
 ## Full Setup and Data Generation
 
 ### 1.0 Setup
-- Clone the AMLSim repository to your local machine, e.g., under `~/projects/aml/amlsim/`:
+- Clone the AMLSim repository to your local machine, e.g., under `~/projects/`:
     ```bash
     git clone https://github.com/IBM/AMLSim.git
     ```
-- Clone this `decentralized_aml_demonstrator` repository to your local machine, e.g., under `~/projects/aml/`:
+- Clone this `decentralized_aml_demonstrator` repository to your local machine, e.g., under `~/projects/`:
     ```bash
     git clone https://github.com/Jackson00Han/decentralized_aml_demonstrator.git
     ```
@@ -83,13 +91,13 @@ python scripts/03g_fl_round1_val_eval.py
     ```
    Example:
     ```bash
-    export AMLSIM_DIR=/home/admin_ml/Jackson/projects/aml/amlsim/AMLSim 
-    ```
+    export AMLSIM_DIR=/home/azureuser/projects/AMLSim/
+    ```m 
 1. Copy the `requirements.txt` file and the `three_banks_10K` parameter folder into the AMLSim directory:
     
-    The files associated with AMLSim are provided in the folder `decentralized_aml_demonstrator/move_to_amlsim` for convenience.
+    The files associated with AMLSim are provided in the folder `decentralized_aml_demonstrator/move_to_amlsim`.
     ```bash
-    cp /path/to/decentralized_aml_demonstrator/requirements.txt "$AMLSIM_DIR"/requirements.txt
+    cp /path/to/decentralized_aml_demonstrator/requirements.txt "$AMLSIM_DIR"/requirements.txt # replace the older one if exists
     cp -r /path/to/decentralized_aml_demonstrator/three_banks_10K "$AMLSIM_DIR"/paramFiles/
     ```
 
