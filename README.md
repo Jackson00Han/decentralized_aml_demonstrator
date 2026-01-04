@@ -105,7 +105,7 @@ python scripts/03g_fl_round1_val_eval.py
     javac -version
     ```
 3.2 (Optional) Run following code if javac not installed:
-    ```
+    ```bash
     sudo apt install -y openjdk-21-jdk-headless
     javac -version
     ```
