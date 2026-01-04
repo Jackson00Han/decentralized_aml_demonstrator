@@ -40,7 +40,7 @@ cd /path/to/decentralized_aml_demonstrator/ # cd /home/admin_ml/Jackson/projects
 
 deactivate # optional, deactivate AMLSim venv if active
 
-python -m venv .venv        # if not exists
+python3 -m venv .venv        # if not exists
 source .venv/bin/activate
 pip install -r requirements.txt
 
