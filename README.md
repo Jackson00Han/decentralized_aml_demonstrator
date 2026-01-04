@@ -99,14 +99,14 @@ python scripts/03g_fl_round1_val_eval.py
     sudo apt-get install -y maven graphviz graphviz-dev pkg-config
     ```
 
-3.1 Verify Java:
+3. Verify Java:
 
     ```bash
     java -version
     javac -version
     ```
     
-3.2 (Optional) Run following code if javac not installed:
+   (Optional) Run following code if javac not installed:
 
     ```bash
     sudo apt install -y openjdk-21-jdk-headless
