@@ -113,7 +113,7 @@ python scripts/03g_fl_round1_val_eval.py
     javac -version
     ```
 
-4. Install Python 3.7 via pyenv(is missing)
+4. Install Python 3.7 via pyenv(if no pyenv, install it first)
     ```bash
     pyenv install 3.7.17
     ```
