@@ -65,7 +65,7 @@ python scripts/03g_fl_round1_val_eval.py
     ```
 - Clone this `decentralized_aml_demonstrator` repository to your local machine, e.g., under `~/projects/aml/`:
     ```bash
-    git clone https://github.com/yourusername/decentralized_aml_demonstrator.git
+    git clone [https://github.com/yourusername/decentralized_aml_demonstrator.git](https://github.com/Jackson00Han/decentralized_aml_demonstrator.git)
     ```
 - Create Virtual Environment under this repository and install dependencies:
     ```bash
