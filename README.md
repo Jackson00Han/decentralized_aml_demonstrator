@@ -42,7 +42,7 @@ deactivate # optional, deactivate AMLSim venv if active
 
 python3 -m venv .venv        # if not exists
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt  # for the first time
 
 
 python scripts/02_process_data.py
